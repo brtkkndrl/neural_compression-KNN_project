@@ -1,7 +1,9 @@
 from .basic_ae import BasicAE
+from .DCAL_2018 import DCAL_2018
 
 MODEL_REGISTRY = {
-    "basic": BasicAE
+    "basic": BasicAE,
+    "DCAL_2018": DCAL_2018
 }
 
 
