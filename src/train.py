@@ -7,7 +7,7 @@ from models import get_model
 
 MODEL_NAME = "basic"
 DATA_DIR = "../datasets/imagenet_subtrain"
-EPOCHS = 5
+EPOCHS = 10
 LEARNING_RATE = 1e-3
 
 torch.set_float32_matmul_precision("medium")

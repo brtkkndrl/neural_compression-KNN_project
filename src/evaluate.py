@@ -61,8 +61,7 @@ def quantize_tensor(tensor):
     tensor_rec = (tensor_u8.to(torch.float) / 255.0) * (high - low) + low
 
     return (tensor_u8, tensor_rec)
-
-    
+  
 def eval_compression():
     FILE = "../datasets/misc/div2k_greece.png"
 
@@ -101,6 +100,8 @@ def eval_compression():
     encoded = codec.encode(quantized_tensor.flatten().tolist())
     buf_compressed = io.BytesIO(encoded)
 
+    print(f"bottlneck size {len(quantized_tensor[0].flatten().tolist())}")
+
     img_size = buf_img.tell()
     compressed_size = buf_compressed.getbuffer().nbytes
     ratio = img_size / compressed_size
@@ -116,7 +117,6 @@ def eval_compression():
         reconstructed.paste(patch, (x, y))
 
     reconstructed.save(f"{OUTPUT_DIR}/reconstructed.png")
-
 
 def eval_patches():
     os.makedirs("outputs", exist_ok=True)
@@ -178,7 +178,6 @@ def eval_patches():
  
 def main():
     eval_compression()
-    return
     eval_patches()
 
 if __name__ == "__main__":
