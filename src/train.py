@@ -6,7 +6,7 @@ from data import ImageNetSubsetDataModule, ImageNet10KDataModule
 from models import get_model
 
 MODEL_NAME = "basic"
-DATA_DIR = "../datasets/imagenet_10k"
+DATA_DIR = "../datasets/imagenet_subtrain"
 EPOCHS = 5
 LEARNING_RATE = 1e-3
 
