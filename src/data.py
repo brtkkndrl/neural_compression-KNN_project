@@ -60,7 +60,7 @@ class ImageNetSubsetDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
 
-class ImageNet10KDataModule(pl.LightningDataModule):
+class CommonImagesDataModule(pl.LightningDataModule):
     def __init__(self, data_dir, batch_size=64, num_workers=4, patch_size = 256):
         super().__init__()
         self.data_dir = data_dir
@@ -138,4 +138,4 @@ class Div2KDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(self.test_ds, batch_size=self.batch_size, shuffle=False,
-                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
+                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)    

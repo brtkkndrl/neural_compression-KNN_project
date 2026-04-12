@@ -10,11 +10,14 @@ import io
 from torchvision import transforms
 import dahuffman
 
-from data import ImageNetSubsetDataModule, ImageNet10KDataModule
+from data import ImageNetSubsetDataModule, CommonImagesDataModule
 from models import get_model
 
+import argparse
+
 MODEL = "basic"
-CKPT = "checkpoints/basic-best.ckpt"
+CKPT = "checkpoints/basic_minecraft-basic-best.ckpt"
+# CKPT = "checkpoints/basic-best.ckpt"
 DATA_DIR = "../datasets/imagenet_subtrain"
 NUM_IMAGES = 8
 OUTPUT_DIR = "outputs"
@@ -157,10 +160,11 @@ def eval_compression():
 
     reconstructed.save(f"{OUTPUT_DIR}/reconstructed.png")
 
+# TODO use test dataset
 def eval_patches():
     os.makedirs("outputs", exist_ok=True)
 
-    datamodule = ImageNet10KDataModule(
+    datamodule = CommonImagesDataModule(
         data_dir=DATA_DIR,
         batch_size=NUM_IMAGES
     )
@@ -203,6 +207,13 @@ def eval_patches():
     print(f"Image saved to {save_path}")
  
 def main():
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("--model_name", type=str, required=True)
+    # parser.add_argument("--model_checkpoint", type=str, required=True)
+    # args = parser.parse_args()
+
+    # print(args.model_name)
+    
     eval_compression()
     eval_patches()
 
