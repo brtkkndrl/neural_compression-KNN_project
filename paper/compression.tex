@@ -12,7 +12,7 @@
 
 \title{Image Compression Using Neural Networks}
 
-\author{Tomáš Macák \\
+\author{\IEEEauthorblockN{Tomáš Macák}
 \IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
 \textit{name of organization (of Aff.)}\\
 City, Country \\
@@ -33,44 +33,45 @@ email address or ORCID}
 
 \maketitle
 
-% \begin{abstract}
+\begin{abstract}
+Neural networks can achieve high levels of compression by learning to represent an image through its underlying structure and producing a size-efficient coding. We employ Convolutional Autoencoders to extract the bottleneck weights as the compressed representation.
+\end{abstract}
 
-% \end{abstract}
 
 \begin{IEEEkeywords}
-image compression, neural networks
+image compression, deep neural networks
 \end{IEEEkeywords}
-
-
-\section{Abstract}
-Neural networks can achieve high levels of compression by "understanding" the image structure and producing very efficient coding. We aim to employ Convolutional Autoencoders (AE) to extract the bottleneck weights as the compressed representation.
 
 
 \section{Introduction}
 Compression is when big image go small \cite{deshmukh_image_2019} \cite{ivanova_image_2022}.
 
 
-\section{Methodology}
+\section{Related Work}
+idk
+\subsection{AE Based Compression}
+no
 
 
+\section{Experiments}
+This section explains the structure of our work and the experiments conducted to evaluate its compression strength.
 
-\section{Work Overview}
-compression:
-Image -> CAE -> quantization -> entropy coding -> Compressed format
-decompression/recovery:
-Compressed format -> entropy decoding -> CAE -> Image
+\subsection{Implementation Details}
+For ease of use, we propose a harness that allows for seamless swapping of different compression architectures. The harness provides standardized dataset loading and preprocessing, while also providing evaluation capabilities.
 
-Input image split into patches e.g 128x128 [1]
-Loss:
-MSE [1], Model-derived loss [3]
-Training:
-Modern gaming GPU or Google Colab should suffice. [1]
-
-\subsection{Maintaining the Integrity of the Specifications}
+\subsection{Model Architecture}
+tbd
 
 
+\section{Evaluation}
+very good
 
-\section{Source Code}
+
+\section{Conclusion}
+it compress
+
+
+\section*{Source Code}
 The implementation can be accessed from a public GitHub repository at 
 \url{https://github.com/the753q/neural_compression-KNN_project}.
 
