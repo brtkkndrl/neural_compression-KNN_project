@@ -2,20 +2,25 @@ import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-from data import ImageNetSubsetDataModule, ImageNet10KDataModule
+from data import ImageNetSubsetDataModule, ImageNet10KDataModule, Div2KDataModule
 from models import get_model
 
 MODEL_NAME = "basic"
 DATA_DIR = "../datasets/imagenet_subtrain"
-EPOCHS = 10
+EPOCHS = 5
 LEARNING_RATE = 1e-3
 
 torch.set_float32_matmul_precision("medium")
 
-
 def main():
-    datamodule = ImageNet10KDataModule(
-        data_dir=DATA_DIR,
+    # datamodule = ImageNet10KDataModule(
+    #     data_dir=DATA_DIR,
+    #     batch_size=8
+    # )
+
+    datamodule = Div2KDataModule(
+        train_dir="../datasets/DIV2K_train_HR",
+        val_dir="../datasets/DIV2K_train_HR",
         batch_size=8
     )
 

@@ -81,7 +81,7 @@ class ImageNet10KDataModule(pl.LightningDataModule):
         dataset = Subset(dataset, [
             i for i, (path, _) in enumerate(dataset.samples)
                 if min(Image.open(path).size) >= self.patch_size
-        ]) # remove images smaller than path size
+        ]) # remove images smaller than patch size
 
         self.train_ds, self.val_ds, self.test_ds = random_split(
             dataset, [0.8, 0.1, 0.1],
@@ -99,3 +99,43 @@ class ImageNet10KDataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.test_ds,  batch_size=self.batch_size, shuffle=False,
                            num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
+    
+class Div2KDataModule(pl.LightningDataModule):
+    def __init__(self, train_dir, val_dir, batch_size=64, num_workers=4, patch_size=256):
+        super().__init__()
+        self.train_dir = train_dir
+        self.val_dir = val_dir
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.patch_size = patch_size
+
+        self.transform = transforms.Compose([
+            transforms.RandomCrop((self.patch_size, self.patch_size)),
+            transforms.ToTensor(),
+        ])
+
+        self.collate_fn = lambda batch: torch.stack([img for img, _ in batch])
+
+    def setup(self, stage=None):
+        train_dataset = ImageFolder(self.train_dir, transform=self.transform)
+        val_dataset   = ImageFolder(self.val_dir,   transform=self.transform)
+
+        self.train_ds = train_dataset
+        # split validation into validation and test
+        n = len(val_dataset)
+        self.val_ds, self.test_ds = random_split(
+            val_dataset, [n // 2, n - n // 2],
+            generator=torch.Generator().manual_seed(42)
+        )
+
+    def train_dataloader(self):
+        return DataLoader(self.train_ds, batch_size=self.batch_size, shuffle=True,
+                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_ds, batch_size=self.batch_size, shuffle=False,
+                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_ds, batch_size=self.batch_size, shuffle=False,
+                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
