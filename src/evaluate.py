@@ -15,6 +15,41 @@ DATA_DIR = "../datasets/imagenet_subtrain"
 NUM_IMAGES = 8
 OUTPUT_DIR = "outputs"
 
+class ImageComparisonMetrics:
+    def __init__(self):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.reset()
+
+    def reset(self):
+        self.psnr_metric = PeakSignalNoiseRatio(data_range=1.0).to(self.device)
+        self.ssim_metric = StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device)
+        self.total_mse = 0.0
+        self.num_samples = 0
+        self.finilized = False
+
+    def update(self, reconstruction, original):
+        assert(not self.finilized)
+        self.total_mse += F.mse_loss(reconstruction, original).item()
+        self.psnr_metric.update(reconstruction, original)
+        self.ssim_metric.update(reconstruction, original)
+        self.num_samples += 1
+
+    def finilize(self):
+        self.avg_mse = self.total_mse / self.num_samples
+        self.avg_psnr = self.psnr_metric.compute()
+        self.avg_ssim = self.ssim_metric.compute()
+        self.finilized = True
+
+    def print_summary(self):
+        if not self.finilized:
+            self.finilize()
+        print("\n" + "=" * 30)
+        print(f"Total samples: {self.num_samples}")
+        print(f"MSE:  {self.avg_mse:.6f}")
+        print(f"PSNR: {self.avg_psnr:.2f} dB")
+        print(f"SSIM: {self.avg_ssim:.4f}")
+        print("=" * 30 + "\n")
+
 def non_overlaping_patches(img):
     """
         Creates non-overlapping patches of the image.
@@ -137,11 +172,7 @@ def eval_patches():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
-    psnr_metric = PeakSignalNoiseRatio(data_range=1.0).to(device)
-    ssim_metric = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
-
-    total_mse = 0.0
-    num_batches = 0
+    img_comp_metrics = ImageComparisonMetrics()
 
     first_batch_originals = torch.empty(0)
     first_batch_reconstructions = torch.empty(0)
@@ -152,24 +183,13 @@ def eval_patches():
             originals = batch.to(device)
             reconstructions = model(originals)
 
-            total_mse += F.mse_loss(reconstructions, originals).item()
-            psnr_metric.update(reconstructions, originals)
-            ssim_metric.update(reconstructions, originals)
-            num_batches += 1
+            img_comp_metrics.update(reconstructions, originals)
 
             if i == 0:
                 first_batch_originals = originals
                 first_batch_reconstructions = reconstructions
 
-    avg_mse = total_mse / num_batches
-    avg_psnr = psnr_metric.compute()
-    avg_ssim = ssim_metric.compute()
-
-    print("\n" + "=" * 30)
-    print(f"MSE:  {avg_mse:.6f}")
-    print(f"PSNR: {avg_psnr:.2f} dB")
-    print(f"SSIM: {avg_ssim:.4f}")
-    print("=" * 30 + "\n")
+    img_comp_metrics.print_summary()
 
     comparison = torch.cat([first_batch_originals, first_batch_reconstructions])
     save_path = f"outputs/{MODEL}_comparison.png"
