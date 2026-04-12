@@ -31,6 +31,12 @@ datamodule_default_imagenet10k = ClassImagesDataModule(
     random_crop=True
 )
 
+datamodule_no_crop_imagenet10k = ClassImagesDataModule(
+    data_dir="../datasets/imagenet_subtrain",
+    batch_size=1,
+    random_crop=False
+)
+
 datamodule_default_concat = ConcatDatasetsDataModule(
     [datamodule_default_div2k, datamodule_default_imagenet10k],
     batch_size=8
@@ -80,52 +86,62 @@ class ImageComparisonMetrics:
         print(f"SSIM: {self.avg_ssim:.4f}")
         print("=" * 30 + "\n")
 
-def non_overlaping_patches(img):
-    """
+class ImagePatcher:
+    def __init__(self):
+        pass
+    
+    def create_patches(self, img):
+        """
         Creates non-overlapping patches of the image.
         Returns:
             list: list of tuples ((x,y), image_data)
-    """
-    patch_size = 256
+        """
+        patch_size = 256
 
-    # pad to create non-overlaping patches
-    pad_w = (patch_size - img.size[0] % patch_size) % patch_size
-    pad_h = (patch_size - img.size[1] % patch_size) % patch_size
+        # pad to create non-overlaping patches
+        pad_w = (patch_size - img.size[0] % patch_size) % patch_size
+        pad_h = (patch_size - img.size[1] % patch_size) % patch_size
 
-    img = ImageOps.expand(img, (0, 0, pad_w, pad_h))
+        img = ImageOps.expand(img, (0, 0, pad_w, pad_h))
 
-    patches = []
+        patches = []
 
-    for y in range(0, img.size[1], patch_size):
-        for x in range(0, img.size[0], patch_size):
-            patch_img = img.crop((x, y, x + patch_size, y + patch_size))
-            patch = ((x,y), patch_img)
-            patches.append(patch)
+        for y in range(0, img.size[1], patch_size):
+            for x in range(0, img.size[0], patch_size):
+                patch_img = img.crop((x, y, x + patch_size, y + patch_size))
+                patch = ((x,y), patch_img)
+                patches.append(patch)
 
-    return patches
+        return patches
 
-def quantize_tensor(tensor):
-    """
-        Quantizes tensor using IQR.
-        Returns:
-            tuple: (quantized, reversed)
-    """
-    q25 = torch.quantile(tensor, 0.25)
-    q75 = torch.quantile(tensor, 0.75)
-    iqr = q75 - q25
-    low  = q25 - 1.5 * iqr
-    high = q75 + 1.5 * iqr
+    def combine_patches(self, img_size, positions, patches):
+        reconstructed = Image.new("RGB", img_size)
+        for (x,y), patch in zip(positions, patches):
+            reconstructed.paste(patch, (x, y))
+        return reconstructed
 
-    tensor = tensor.clamp(low, high) # clamp
-    tensor = (tensor - low) / (high - low) # normalize
-
-    tensor_u8 = (tensor * 255).round().to(torch.uint8)
-
-    tensor_rec = (tensor_u8.to(torch.float) / 255.0) * (high - low) + low
-
-    return (tensor_u8, tensor_rec)
-  
 def eval_compression(model_name, model_checkpoint, datamodule):
+    def quantize_tensor(tensor):
+        """
+            Quantizes tensor using IQR.
+            Returns:
+                tuple: (quantized, reversed)
+        """
+        q25 = torch.quantile(tensor, 0.25)
+        q75 = torch.quantile(tensor, 0.75)
+        iqr = q75 - q25
+        low  = q25 - 1.5 * iqr
+        high = q75 + 1.5 * iqr
+
+        tensor = tensor.clamp(low, high) # clamp
+        tensor = (tensor - low) / (high - low) # normalize
+
+        tensor_u8 = (tensor * 255).round().to(torch.uint8)
+
+        tensor_rec = (tensor_u8.to(torch.float) / 255.0) * (high - low) + low
+
+        return (tensor_u8, tensor_rec)
+
     assert(datamodule.batch_size == 1) # prevent too big sizes in memmory
 
     datamodule.setup()
@@ -143,6 +159,7 @@ def eval_compression(model_name, model_checkpoint, datamodule):
     model = model.to(device)
 
     img_comp_metrics = ImageComparisonMetrics()
+    img_patcher = ImagePatcher()
 
     N_IMAGES = 4
     print("="*45)
@@ -154,7 +171,7 @@ def eval_compression(model_name, model_checkpoint, datamodule):
 
         img = transforms.ToPILImage()(batch_tensor[0]).convert("RGB")
 
-        patches = non_overlaping_patches(img)
+        patches = img_patcher.create_patches(img)
 
         transform = transforms.ToTensor()
         patches_batch = torch.stack([transform(patch) for _, patch in patches]).to(device)
@@ -181,10 +198,9 @@ def eval_compression(model_name, model_checkpoint, datamodule):
 
         print(f"{i}\t{img.size[0]}x{img.size[1]}\t{img_size//1024} KB \t{compressed_size//1024} KB \t{ratio:>15.2f}x")
 
-        reconstructed = Image.new("RGB", img.size)
-        for rec_patch, ((x,y), _) in zip(reconstructions, patches):
-            patch = transforms.ToPILImage()(rec_patch.cpu())
-            reconstructed.paste(patch, (x, y))
+        reconstructed = img_patcher.combine_patches(img.size,
+                        [(x,y) for (x,y), _ in patches],
+                        [transforms.ToPILImage()(r.cpu()) for r in reconstructions])
 
         img_comp_metrics.update(transform(img).unsqueeze(0), transform(reconstructed).unsqueeze(0))
 
@@ -233,9 +249,11 @@ def eval_patches(model_name, model_checkpoint, datamodule):
  
 def main():
     os.makedirs("outputs", exist_ok=True)
-    # eval_patches("basic", "checkpoints/basic_imagenet10k-basic-best.ckpt", datamodule_default_imagenet10k)
-    eval_patches("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_default_concat)
-    eval_compression("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_no_crop_concat)
+    eval_patches("basic", "checkpoints/basic_imagenet10k-basic-best.ckpt", datamodule_default_imagenet10k)
+    eval_compression("basic", "checkpoints/basic_imagenet10k-basic-best.ckpt", datamodule_no_crop_imagenet10k)
+    
+    # eval_patches("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_default_concat)
+    # eval_compression("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_no_crop_concat)
 
 if __name__ == "__main__":
     main()
