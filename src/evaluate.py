@@ -10,7 +10,7 @@ import io
 from torchvision import transforms
 import dahuffman
 
-from data import ImageNetSubsetDataModule, ClassImagesDataModule, Div2KDataModule, ConcatDatasetsDataModule
+from data import DF2KDataModule, ClassImagesDataModule
 
 from models import get_model
 
@@ -18,36 +18,30 @@ import argparse
 
 OUTPUT_DIR = "outputs"
 
-datamodule_default_div2k = Div2KDataModule(
-    train_dir="../datasets/DIV2K_train_HR",
-    val_dir="../datasets/DIV2K_train_HR",
-    batch_size=8
-)
-
-datamodule_default_imagenet10k = ClassImagesDataModule(
-    data_dir="../datasets/imagenet_subtrain",
+datamodule_imagenet10k_crop = ClassImagesDataModule(
+    data_dir="datasets/imagenet_10K/imagenet_subtrain",
     batch_size=8,
     random_crop=True
 )
 
-datamodule_no_crop_imagenet10k = ClassImagesDataModule(
-    data_dir="../datasets/imagenet_subtrain",
+datamodule_imagenet10k_no_crop = ClassImagesDataModule(
+    data_dir="datasets/imagenet_10K/imagenet_subtrain",
     batch_size=1,
     random_crop=False
 )
 
-datamodule_default_concat = ConcatDatasetsDataModule(
-    [datamodule_default_div2k, datamodule_default_imagenet10k],
-    batch_size=8
+datamodule_df2k_crop = DF2KDataModule(
+    train_dir="datasets/DF2K/train",
+    test_dir="datasets/DF2K/test",
+    batch_size=8,
+    random_crop=True
 )
 
-datamodule_no_crop_concat = ConcatDatasetsDataModule(
-    [
-        Div2KDataModule(train_dir="../datasets/DIV2K_train_HR",
-                      val_dir="../datasets/DIV2K_train_HR", random_crop=False),
-        ClassImagesDataModule(data_dir="../datasets/imagenet_subtrain", random_crop=False)
-    ],
-    batch_size=1
+datamodule_df2k_no_crop = DF2KDataModule(
+    train_dir="datasets/DF2K/train",
+    test_dir="datasets/DF2K/test",
+    batch_size=1,
+    random_crop=False
 )
 
 class ImageComparisonMetrics:
@@ -261,9 +255,15 @@ def eval_patches(model_name, model_checkpoint, datamodule):
  
 def main():
     os.makedirs("outputs", exist_ok=True)
-    eval_patches("basic", "checkpoints/basic_imagenet10k-basic-best.ckpt", datamodule_default_imagenet10k)
-    eval_compression("basic", "checkpoints/basic_imagenet10k-basic-best.ckpt", datamodule_no_crop_imagenet10k)
+
     
+    eval_patches("basic", "checkpoints/basic_imagenet10k-basic-best-v1.ckpt", datamodule_imagenet10k_crop)
+    eval_compression("basic", "checkpoints/basic_imagenet10k-basic-best-v1.ckpt", datamodule_imagenet10k_no_crop)
+    
+    eval_patches("basic", "checkpoints/basic_imagenet10k-basic-best-v1.ckpt", datamodule_df2k_crop)
+    eval_compression("basic", "checkpoints/basic_imagenet10k-basic-best-v1.ckpt", datamodule_df2k_no_crop)
+    
+
     #eval_patches("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_default_concat)
     #eval_compression("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_no_crop_concat)
 

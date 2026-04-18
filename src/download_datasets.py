@@ -27,8 +27,8 @@ def get_df2k():
     print(f"Downloading dataset flickr2k")
     flickr2k_path = kagglehub.dataset_download("daehoyang/flickr2k")
 
-    DF2K_TRAIN_DIR = f"{DATASETS_DIR}/DF2K/train"
-    DF2K_TEST_DIR = f"{DATASETS_DIR}/DF2K/test"
+    DF2K_TRAIN_DIR = f"{DATASETS_DIR}/DF2K/train/train"
+    DF2K_TEST_DIR = f"{DATASETS_DIR}/DF2K/test/test"
 
     os.makedirs(DF2K_TRAIN_DIR, exist_ok=True)
     os.makedirs(DF2K_TEST_DIR, exist_ok=True)
@@ -46,10 +46,8 @@ def get_df2k():
 
     # separate test files
     all_files = os.listdir(DF2K_TRAIN_DIR)
-    all_files = random.shuffle(all_files)
+    random.shuffle(all_files)
     test_files = all_files[:100]
-
-    print(test_files[0])
 
     for f in test_files:
         shutil.move( os.path.join(DF2K_TRAIN_DIR, f),
@@ -61,5 +59,5 @@ def get_df2k():
 shutil.rmtree(DATASETS_DIR, ignore_errors=True)
 os.makedirs(DATASETS_DIR, exist_ok=True)
 
-get_dataset(kaggle_path="priyerana/imagenet-10k", name="ImageNet_10K")
+get_dataset(kaggle_path="priyerana/imagenet-10k", name="imagenet_10K")
 get_df2k()
