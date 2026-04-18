@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 
 from .base import BaseAutoencoder
+import torch.nn.functional as F
 
 
 class DownBranch(nn.Module):
@@ -104,6 +105,24 @@ class DCAL_2018(BaseAutoencoder):
         super().__init__(learning_rate=learning_rate)
         self.encoder = Encoder()
         self.decoder = Decoder()
+
+    def training_step(self, batch, batch_idx):
+        x = batch
+        z = self.encoder(x)
+
+        # TODO could be a parameter
+        # add uniform noise for resilience against quantization
+        noise = torch.zeros_like(z).uniform_(-(1.0/1024.0), 1.0/1024.0)
+
+        x_hat = self.decoder(z+noise)
+
+        # TODO could be a parameter
+        rate_coef = 1 # higher -> more compression
+
+        loss = F.mse_loss(x_hat, x) + rate_coef*torch.mean(z ** 2)
+        
+        self.log("train_loss", loss, prog_bar=True)
+        return loss
 
     def forward(self, x):
         z = self.encoder(x)

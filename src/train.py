@@ -32,8 +32,8 @@ def experiment1():
     """
     EXPERIMENT_NAME = "basic_imagenet10k"
     MODEL_NAME = "basic"
-    EPOCHS = 5
-    LEARNING_RATE = 1e-3
+    EPOCHS = 15
+    LEARNING_RATE = 1e-4
     
     model = get_model(MODEL_NAME, learning_rate=LEARNING_RATE)
 
