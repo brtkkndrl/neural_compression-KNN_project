@@ -15,43 +15,105 @@
 \author{\IEEEauthorblockN{Tomáš Macák}
 \IEEEauthorblockA{\textit{Faculty of Information Technology} \\
 \textit{Brno University of Technology}\\
-Brno, Czech Republic \\
-idk ci neostanu len mena}
+Brno, Czech Republic}
 \and
-\IEEEauthorblockN{2\textsuperscript{nd} Given Name Surname}
-\IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
-\textit{name of organization (of Aff.)}\\
-City, Country \\
-email address or ORCID}
+\IEEEauthorblockN{Bartosz Konderla}
+\IEEEauthorblockA{\textit{Faculty of Information Technology} \\
+\textit{Brno University of Technology}\\
+Brno, Czech Republic}
 \and
-\IEEEauthorblockN{3\textsuperscript{rd} Given Name Surname}
-\IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
-\textit{name of organization (of Aff.)}\\
-City, Country \\
-email address or ORCID}
+\IEEEauthorblockN{Peter Va\v{n}o}
+\IEEEauthorblockA{\textit{Faculty of Information Technology} \\
+\textit{Brno University of Technology}\\
+Brno, Czech Republic}
 }
 
 \maketitle
 
 \begin{abstract}
-Neural networks can achieve high levels of compression by learning to represent an image through its underlying structure and producing a size-efficient coding. We employ Convolutional Autoencoders to extract the bottleneck weights as the compressed representation.
+Neural networks can achieve high levels of compression by learning to represent an image through its underlying structure and producing a size-efficient coding. We employ convolutional autoencoders to extract the bottleneck weights as the compressed representation.
 \end{abstract}
 
 
 \begin{IEEEkeywords}
-image compression, deep neural networks
+learned image compression, convolutional autoencoders, deep neural networks
 \end{IEEEkeywords}
 
 
 \section{Introduction}
-Compression is when big image go small \cite{deshmukh_image_2019} \cite{ivanova_image_2022}.
+As the availability of processing power rises, so does the volume and resolution of image data. To store these large amounts of data, an ongoing tradeoff between the source file's original structure and its lossy compressed representation has to be made.
+
+Traditional image compression methods, like JPEG, rely on the hand-crafted encoder/decoder block \cite{cheng_deep_2018}. These methods, while possibly not optimal, were also designed to work within the low processing power of older devices.
+
+With the advent of deep learning, new methods of compression have appeared. Instead of having to design the codec using concrete rules, whether programmatically or by hand, a neural network can learn these rules. Without being constrained, the right model architecture can subsequently provide a more efficient representation of an image in the outputted bottleneck features. 
+
+It's important to note, however, that the stronger the compression we require, the bigger the model must be if we want to preserve a high quality representation. The model's weights must also be available on the device that aims to perform the operation. Model inference also requires more power than rule-based methods do.
+
+When it comes to general autoencoder models, the encoding part produces the bottleneck features representing a compressed image, but to decompress, the same neural network operations generally cannot be reversed. As such, the model is built with a second decoder block. During training, the encoder and decoder parts are then evaluated and updated together.
 
 
 \section{Related Work}
-idk
 \subsection{AE Based Compression}
-no
 
+
+\section{Evaluation}
+We describe the datasets used for the training of our compression models and the ways in which we evaluate them.
+
+\subsection{Datasets}
+In this work, we aim to train a compression model for common images. With this in mind, our models have to handle pictures taken with consumer smartphones. As such, the chosen datasets contain images with resolutions of at least about 400 pixels on average. Additionally, the datasets must contain enough pictures to prevent overfitting of the models.
+
+\paragraph{ImageNet 10k}
+ImageNet is an image dataset organized according to concepts constructed from the WordNet hierarchy. Each concept category is, on average, represented by about 1000 images \cite{noauthor_imagenet_nodate-1}.
+
+For basic experiments, we use a subset of the dataset. The ImageNet 10k dataset contains 10 randomly selected images from each of the 1000 classes of the original \cite{noauthor_imagenet_nodate}. 
+
+\paragraph{Flickr-Faces-HQ small}
+The Flickr Faces dataset contains high-quality images of human faces. It offers 70,000 PNG images at 1024×1024 resolution that display diverse ages, ethnicities, image backgrounds, and accessories like hats and eyeglasses \cite{noauthor_flickr-faces-hq_nodate}.
+
+\subsection{Metrics}
+We evaluate the models based on various metrics, such as compression strength, reconstruction quality, and compute cost.
+
+\paragraph{Bits per Pixel}
+The bits per pixel (BPP) metric is defined as the ratio of the total size of the compressed image to the total number of pixels in the image. To calculate it, we can define it as \cite{ungureanu_image-compression_2024}:
+
+\begin{equation}
+    \text{BPP} = \frac{\text{file size in bits}}{H \times W}
+\end{equation}
+where $H$ and $W$ is the height and weight of the image.
+
+Comparing the BPP values of the source and compressed file gives us the compression strength.
+
+\paragraph{Mean Squared Error}
+Mean squared error (MSE) captures the pixel-wise squared difference averaged \cite{ungureanu_image-compression_2024}: 
+
+\begin{equation}
+    \text{MSE} = \frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2
+\end{equation}
+
+\paragraph{Peak Signal-to-Noise Ratio}
+Peak signal-to-noise ratio (PSNR) is defined as the ratio of the maximum pixel intensity to the mean-square error, and it is measured in decibels (dB). A higher value for the PSNR metric represents better image quality \cite{ungureanu_image-compression_2024}:
+\begin{equation}
+    \text{PSNR} = 10 \cdot \log_{10} \left( \frac{MAX_I^2}{MSE} \right)
+\end{equation}
+
+where $MAX_I$ represents the maximum possible pixel value of the image. Compared to MSE, PSNR transforms the error scale into a more manageable logarithmic one, where in practice, most values land on a scale of $[0, 100]$ (theoretically, in the case of no error, to $\infty$).
+
+\paragraph{Structure Similarity Index}
+Structural similarity index (SSIM) measures structural similarity. It models perceived quality by comparing local luminance, contrast, and structural correlation, reflecting the non-linear sensitivity of the human visual system to image distortions. It's based on visible structures inside the image and can predict the perceived quality of the compressed image. 
+The resulting value of this metric is between -1 and 1 (when identical). The equation is:
+
+\begin{equation}
+\mathrm{SSIM}(x,y) =
+\frac{(2\mu_x \mu_y + C_1)(2\sigma_{xy} + C_2)}
+     {(\mu_x^2 + \mu_y^2 + C_1)(\sigma_x^2 + \sigma_y^2 + C_2)}
+\end{equation}
+
+where $\mu_x$ and $\mu_y$ are the local means of windows $x$ and $y$, 
+$\sigma_x^2$ and $\sigma_y^2$ are the corresponding variances, 
+$\sigma_{xy}$ is the covariance between $x$ and $y$, 
+$C_1 = (K_1 L)^2$ and $C_2 = (K_2 L)^2$ are stability constants, 
+$L$ is the dynamic range of pixel values (for 8-bit images, 255), 
+and $K_1$, $K_2$ are small constants (typically $K_1=0.01$ and $K_2=0.03$) \cite{ungureanu_image-compression_2024}.
 
 \section{Experiments}
 This section explains the structure of our work and the experiments conducted to evaluate its compression strength.
@@ -59,11 +121,11 @@ This section explains the structure of our work and the experiments conducted to
 \subsection{Implementation Details}
 For ease of use, we propose a harness that allows for seamless swapping of different compression architectures. The harness provides standardized dataset loading and preprocessing while also providing evaluation capabilities.
 
-First, the $data.py$ file defines the various datasets we use, each as its own subclass of the PyTorch Lightning library $LightningDataModule$, achieving seamless integration within the main training code. Batch size and the number of workers for batch preparation are defined for each module. Additionally, we set whether we want the images to be scaled to a fixed size or cut into patches. By splitting each image into sub-parts, we allow the model to learn from more examples and prevent overfitting. Multiple datasets can be concatenated as well. Inside the class, we also define the separate train, test, and validation sets. 
+First, the $data.py$ file defines the various datasets we use, each as its own subclass of the PyTorch Lightning \cite{noauthor_pytorch_nodate} library $LightningDataModule$, achieving seamless integration within the main training code. Batch size and the number of workers for batch preparation are defined for each module. Additionally, we set whether we want the images to be scaled to a fixed size or cut into patches. By splitting each image into sub-parts, we allow the model to learn from more examples and prevent overfitting. Multiple datasets can be concatenated as well. Inside the class, we also define the separate train, test, and validation sets. 
 
 The $train.py$ file describes the main training pipeline, containing experiments that combine datasets with models. PyTorch Lightning then takes care of the training process.
 
-Models are built on top of a base autoencoder module in the $base.py$ file, implementing training and validation steps, all built on top of $LightningModule$. The concrete model architecture is then implemented in its own .py file, inheriting the $BaseAutoencoder$ class and usually implementing the encoder, decoder, and forward pass parts of the model.
+Models are built on top of a base autoencoder module in the $base.py$ file, implementing training and validation steps, all built on top of $LightningModule$. The concrete model architecture is then implemented in its own $.py$ file, inheriting the $BaseAutoencoder$ class and usually implementing the encoder, decoder, and forward pass parts of the model.
 
 Evaluation is then performed via the $evaluate.py$ file, which loads dataset modules, compression metrics, and performs the compression and decompression of images with a specified trained model. 
 Each image is sliced into parts, with each part compressed individually. After subsequent decompression, the slices are merged together to reconstruct the original image. The slicing algorithm creates non-overlapping slices that, during compression, leave the model without the context of the surrounding area.
@@ -72,7 +134,7 @@ During encoding, the model output is quantized, where outliers are clamped to an
 
 Decoding part of the process maps the 8-bit values back to the $[0, 1]$ range of the model, runs them through the decoder, and performs the stitching of the slices back into a single image.
 
-Based on the decompressed image, MSE, PSNR, and SSIM statistics are calculated.
+Based on the decompressed image, MSE, PSNR, and SSIM metrics are calculated.
 
 \subsection{Model Architecture}
 The proposed model is a convolutional autoencoder consisting of two symmetric subnetworks: an encoder that progressively compresses the input into a compact latent representation, and a decoder that reconstructs the original input from that representation. The full model, \texttt{BasicAE}, is implemented as a PyTorch Lightning module inheriting from a shared \texttt{BaseAutoencoder} base class.
@@ -85,21 +147,13 @@ Training is supervised by the mean squared error between the input $x$ and its r
 Parameters are optimized using the Adam optimizer with a default learning rate of $10^{-3}$. Both training and validation losses are logged at each step to monitor convergence and detect overfitting.
 
 
-\section{Evaluation}
-very good
+{\color{red}\textit{We will get a much smaller image that is represented by small areas defined by those parameters. This representation is much smaller and it still can be compressed by conventional algorithms to get even smaller. This is what we want to store, as it is the smallest data representation. When we want to decompress the data, we will start by decompressing in the conventional manner, so we will again get the flags-area representation. This representation is then reconstructed by the second part of the model, which will generate the image back to the required resolution. As the image is generated, there is the mentioned data loss. 
+}}
 
-\subsection{Datasets}
-We used imagenet photos.
-
-\subsection{MSE, PSNR, and SSIM statistics }
-MSE, PSNR, and SSIM statistics  theory??????????????????????
-
-\subsection{Results}
-250 percent good
 
 
 \section{Conclusion}
-it compress
+
 
 
 \section*{Source Code}
