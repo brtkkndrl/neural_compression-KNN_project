@@ -7,6 +7,7 @@ class BaseAutoencoder(pl.LightningModule):
     def __init__(self, learning_rate=1e-3):
         super().__init__()
         self.save_hyperparameters()
+        self.name = "unnamed_model"
 
     def forward(self, x):
         raise NotImplementedError("Subclasses must implement the forward pass")

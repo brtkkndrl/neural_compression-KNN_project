@@ -7,12 +7,15 @@ from data import ClassImagesDataModule, DF2KDataModule
 
 from models import get_model
 
+from evaluate import eval_compression, eval_patches
+
 torch.set_float32_matmul_precision("medium")
 
 datamodule_default_imagenet10k = ClassImagesDataModule(
     data_dir="datasets/imagenet_10K/imagenet_subtrain",
     batch_size=8,
-    random_crop=True
+    random_crop=True,
+    patch_size=128
 )
 
 datamodule_df2k = DF2KDataModule(
@@ -22,15 +25,14 @@ datamodule_df2k = DF2KDataModule(
     random_crop=True
 )
 
-
 def experiment1():
     """
         Train a basic AE on ImageNet.
     """
     EXPERIMENT_NAME = "basic_imagenet10k"
     MODEL_NAME = "basic"
-    EPOCHS = 15
-    LEARNING_RATE = 1e-4
+    EPOCHS = 5
+    LEARNING_RATE = 5e-4
     
     model = get_model(MODEL_NAME, learning_rate=LEARNING_RATE)
 
@@ -41,13 +43,13 @@ def experiment1():
         filename=checkpoint_filename,
         save_top_k=1,
         monitor="val_loss",
-        mode="min"
+        mode="min",
     )
 
     trainer = pl.Trainer(
         max_epochs=EPOCHS,
         accelerator="auto",
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback]
     )
 
     print("="*30)
@@ -59,6 +61,23 @@ def experiment1():
 
     print(f"Finished experiment: {EXPERIMENT_NAME}")
     print("="*30)
+
+    # compute latents for quantization
+    all_latents = []
+    model.eval()
+    with torch.no_grad():
+        for batch in datamodule_default_imagenet10k.train_dataloader():
+            z = model.encoder(batch)
+            all_latents.append(z)
+
+    all_latents = torch.cat(all_latents, dim=0)
+
+    # compute priors from latents
+    model.compute_priors(all_latents)
+
+    # save model as torch object
+    best_model = ( model.__class__).load_from_checkpoint(checkpoint_callback.best_model_path)
+    torch.save(best_model, f"checkpoints/manual/{MODEL_NAME}_best.pt")
 
 def experiment2():
     """

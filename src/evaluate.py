@@ -21,7 +21,8 @@ OUTPUT_DIR = "outputs"
 datamodule_imagenet10k_crop = ClassImagesDataModule(
     data_dir="datasets/imagenet_10K/imagenet_subtrain",
     batch_size=8,
-    random_crop=True
+    random_crop=True,
+    patch_size=128
 )
 
 datamodule_imagenet10k_no_crop = ClassImagesDataModule(
@@ -113,7 +114,7 @@ class ImagePatcher:
             reconstructed.paste(patch, (x, y))
         return reconstructed
 
-def eval_compression(model_name, model_checkpoint, datamodule):
+def eval_compression(model, evaluation_name, datamodule):
     def quantize_tensor(tensor):
         """
             Quantizes tensor using IQR.
@@ -142,14 +143,7 @@ def eval_compression(model_name, model_checkpoint, datamodule):
     
     print("Running evaluation of compression...\n")
 
-    print(f"Loading {model_name} from {model_checkpoint}...")
-    model_class = get_model(model_name).__class__
-    model = model_class.load_from_checkpoint(model_checkpoint)
-
-    model.eval()
-    model.freeze()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
+    device = next(model.parameters()).device
 
     img_comp_metrics_ours = ImageComparisonMetrics()
     img_comp_metrics_jpeg = ImageComparisonMetrics()
@@ -207,32 +201,25 @@ def eval_compression(model_name, model_checkpoint, datamodule):
         img_comp_metrics_ours.update(transform(img).unsqueeze(0), transform(reconstructed).unsqueeze(0))
         img_comp_metrics_jpeg.update(transform(img).unsqueeze(0), transform(jpeg_img).unsqueeze(0))
 
-        reconstructed.save(f"{OUTPUT_DIR}/{model_checkpoint.replace("/", "_")}_{i}_reconstructed.png")
+        reconstructed.save(f"{OUTPUT_DIR}/{evaluation_name}_{i}_reconstructed.png")
 
     print("\nOur comparison metrics:")
     img_comp_metrics_ours.print_summary()
     print("\nJPEG comparison metrics:")
     img_comp_metrics_jpeg.print_summary()
 
-def eval_patches(model_name, model_checkpoint, datamodule):
+def eval_patches(model, evaluation_name, datamodule):
     datamodule.setup()
     val_loader = datamodule.val_dataloader()
 
     print("Running evaluation by patches... \n")
 
-    print(f"Loading {model_name} from {model_checkpoint}...")
-    model_class = get_model(model_name).__class__
-    model = model_class.load_from_checkpoint(model_checkpoint)
-
-    model.eval()
-    model.freeze()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-
     img_comp_metrics = ImageComparisonMetrics()
 
     first_batch_originals = torch.empty(0)
     first_batch_reconstructions = torch.empty(0)
+
+    device = next(model.parameters()).device
 
     print("Evaluating model over the validation set...")
     with torch.no_grad():
@@ -249,20 +236,33 @@ def eval_patches(model_name, model_checkpoint, datamodule):
     img_comp_metrics.print_summary()
 
     comparison = torch.cat([first_batch_originals, first_batch_reconstructions])
-    save_path = f"outputs/{model_checkpoint.replace("/", "_")}_comparison.png"
+    save_path = f"outputs/{evaluation_name}_comparison.png"
     save_image(comparison, save_path, nrow=first_batch_originals.shape[0])
     print(f"Image saved to {save_path}")
  
+def load_model_from_checkpoint(model_name, model_checkpoint):
+    print(f"Loading {model_name} from {model_checkpoint}...")
+    model_class = get_model(model_name).__class__
+    model = model_class.load_from_checkpoint(model_checkpoint)
+
+    model.eval()
+    model.freeze()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+
+    return model
+
 def main():
     os.makedirs("outputs", exist_ok=True)
 
     #TODO get rid of need for crop datamodule in eval_patches
 
-    eval_patches("basic", "checkpoints/basic_imagenet10k-basic-best-v1.ckpt", datamodule_imagenet10k_crop)
-    eval_compression("basic", "checkpoints/basic_imagenet10k-basic-best-v1.ckpt", datamodule_imagenet10k_no_crop)
-    
-    eval_patches("basic", "checkpoints/basic_imagenet10k-basic-best-v1.ckpt", datamodule_df2k_crop)
-    eval_compression("basic", "checkpoints/basic_imagenet10k-basic-best-v1.ckpt", datamodule_df2k_no_crop)
+    # basic_model = load_model_from_checkpoint("basic", "checkpoints/basic_imagenet10k-basic-best-v1.ckpt")
+    basic_model = torch.load("checkpoints/manual/basic_best.pt", weights_only=False)
+
+    eval_patches(basic_model, "basic_eval", datamodule_imagenet10k_crop)
+    eval_compression(basic_model, "basic_eval", datamodule_imagenet10k_no_crop)
+    #eval_compression("basic", "checkpoints/basic_imagenet10k-basic-best.ckpt", datamodule_imagenet10k_no_crop)
     
 
     #eval_patches("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_default_concat)
