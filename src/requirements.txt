@@ -2,6 +2,8 @@ aiohappyeyeballs==2.6.1
 aiohttp==3.13.5
 aiosignal==1.4.0
 attrs==26.1.0
+certifi==2026.2.25
+charset-normalizer==3.4.7
 cuda-bindings==13.2.0
 cuda-pathfinder==1.5.2
 cuda-toolkit==13.0.2
@@ -11,6 +13,8 @@ frozenlist==1.8.0
 fsspec==2026.3.0
 idna==3.11
 Jinja2==3.1.6
+kagglehub==1.0.0
+kagglesdk==0.1.19
 lightning==2.6.1
 lightning-utilities==0.15.3
 MarkupSafe==3.0.3
@@ -36,8 +40,10 @@ nvidia-nvtx==13.0.85
 packaging==26.0
 pillow==12.2.0
 propcache==0.4.1
+protobuf==7.34.1
 pytorch-lightning==2.6.1
 PyYAML==6.0.3
+requests==2.33.1
 setuptools==81.0.0
 sympy==1.14.0
 torch==2.11.0
@@ -46,4 +52,5 @@ torchvision==0.26.0
 tqdm==4.67.3
 triton==3.6.0
 typing_extensions==4.15.0
+urllib3==2.6.3
 yarl==1.23.0
