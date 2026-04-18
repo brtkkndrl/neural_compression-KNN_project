@@ -55,7 +55,6 @@ def experiment1():
 
     print(f"Starting training for {MODEL_NAME}...")
     trainer.fit(model, datamodule_default_imagenet10k)
-    #trainer.fit(model, datamodule_df2k)
     print(f"Training complete. Best model saved to checkpoints/{os.path.basename(checkpoint_filename)}.ckpt")
 
     print(f"Finished experiment: {EXPERIMENT_NAME}")
