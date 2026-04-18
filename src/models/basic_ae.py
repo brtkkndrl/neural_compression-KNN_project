@@ -1,6 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import io
+import constriction
+import numpy as np
+import dahuffman
 
 from .base import BaseAutoencoder
 
@@ -41,20 +45,43 @@ class BasicAE(BaseAutoencoder):
         self.encoder = Encoder()
         self.decoder = Decoder()
         self.name = "BasicAE"
-        self.quantization_bits = 12 # lower -> more compression
-        self.rate_coeffitient = 0.2  # higher -> more compression
+        self.quantization_bits = 8 # lower -> more compression
+        self.rate_coeffitient = 0.0  # higher -> more compression
+        assert self.rate_coeffitient >= 0.0
 
     def entropy_coder(self, x):
-        # TODO
-        return x
-    
-    def entropy_decoder(self, x):
-        # TODO
-        return x
+        symbols = x.cpu().numpy().astype(np.int32).flatten()
+        # tile to match batch dimension in symbols
+        means = np.tile(self.z_means.cpu().numpy().flatten(), x.shape[0]).astype(np.float64)
+        stds = np.tile((self.z_stds + 1e-8).cpu().numpy().flatten(), x.shape[0]).astype(np.float64)
+
+        B = self.quantization_bits
+        model_family = constriction.stream.model.QuantizedGaussian(-2**(B-1), 2**(B-1)-1)
+        coder = constriction.stream.stack.AnsCoder()
+        coder.encode_reverse(symbols, model_family, means, stds)
+        compressed =  coder.get_compressed()
+
+        print(symbols[:20])
+        print(f"before {len(symbols)} after {len(compressed)}")
+
+        return compressed
+
+    def entropy_decoder(self, x, original_shape):
+        # tile to match batch size
+        batch_size = original_shape[0]
+        means = np.tile(self.z_means.cpu().numpy().flatten(), batch_size).astype(np.float64)
+        stds = np.tile((self.z_stds + 1e-8).cpu().numpy().flatten(), batch_size).astype(np.float64)
+
+        B = self.quantization_bits
+        model_family = constriction.stream.model.QuantizedGaussian(-2**(B-1), 2**(B-1)-1)
+        decoder = constriction.stream.stack.AnsCoder(x)
+        symbols = decoder.decode(model_family, means, stds)
+        return torch.tensor(symbols, dtype=torch.int32).reshape(original_shape).to(next(self.parameters()).device)
 
     def pca_rotation(self, x):
         # TODO proper PCA
-        return (x - self.z_means) / self.z_stds
+        y = (x - self.z_means) / (self.z_stds+ 1e-8)
+        return y
 
     def pca_inverse(self, x):
         # TODO proper PCA
@@ -62,7 +89,7 @@ class BasicAE(BaseAutoencoder):
 
     def quantizer(self, x):
         B = self.quantization_bits
-        x_quantized = torch.round(2**(B-1) * x).clamp(-2**(B-1), 2**(B-1)-1)
+        x_quantized = torch.round(2**(B-1) * x).clamp(-2**(B-1), 2**(B-1)-1).to(torch.int32)
         return x_quantized
 
     def dequantizer(self, x):
@@ -71,8 +98,10 @@ class BasicAE(BaseAutoencoder):
         return x_reconstructed
 
     def compute_priors(self, all_latents):
-        self.z_means = all_latents.mean(dim=0)
-        self.z_stds = all_latents.std(dim=0)
+        z_means = all_latents.mean(dim=0)
+        z_stds = all_latents.std(dim=0)
+        self.register_buffer('z_means', z_means)
+        self.register_buffer('z_stds', z_stds)
 
     def training_step(self, batch, batch_idx):
         x = batch
@@ -104,10 +133,24 @@ class BasicAE(BaseAutoencoder):
         z = self.encoder(x)
         z_rot = self.pca_rotation(z)
         z_q = self.quantizer(z_rot)
-        z_compressed = self.entropy_coder(z_q)
 
-        z_decompressed = self.entropy_decoder(z_compressed)
+        USE_FANCY_COMPRESSION = False
+        if USE_FANCY_COMPRESSION:
+            z_compressed = self.entropy_coder(z_q)
+            original_shape = z_q.shape
+            z_decompressed = self.entropy_decoder(z_compressed, original_shape)
+            #
+            z_compressed_data = z_compressed.tobytes()
+            #
+        else:
+            symbols = z_q.cpu().numpy().astype(np.int32).flatten()
+            codec = dahuffman.HuffmanCodec.from_data(symbols)
+            z_compressed = codec.encode(symbols)
+            z_decompressed = torch.tensor(codec.decode(z_compressed), dtype=torch.int32).reshape(z_q.shape).to(next(self.parameters()).device)
+            z_compressed_data = z_compressed
+
         z_deq = self.dequantizer(z_decompressed)
         z_inv_rot = self.pca_inverse(z_deq)
         x_hat = self.decoder(z_inv_rot)
-        return (x_hat, z_compressed)
+
+        return (x_hat, z_compressed_data)

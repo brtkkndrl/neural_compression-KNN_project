@@ -81,7 +81,8 @@ class ImageComparisonMetrics:
         print("=" * 30 + "\n")
 
 class ImagePatcher:
-    def __init__(self):
+    def __init__(self, patch_size):
+        self.patch_size = patch_size
         pass
     
     def create_patches(self, img):
@@ -90,7 +91,7 @@ class ImagePatcher:
         Returns:
             list: list of tuples ((x,y), image_data)
         """
-        patch_size = 256
+        patch_size = self.patch_size
 
         # pad to create non-overlaping patches
         pad_w = (patch_size - img.size[0] % patch_size) % patch_size
@@ -115,27 +116,6 @@ class ImagePatcher:
         return reconstructed
 
 def eval_compression(model, evaluation_name, datamodule):
-    def quantize_tensor(tensor):
-        """
-            Quantizes tensor using IQR.
-            Returns:
-                tuple: (quantized, reversed)
-        """
-        q25 = torch.quantile(tensor, 0.25)
-        q75 = torch.quantile(tensor, 0.75)
-        iqr = q75 - q25
-        low  = q25 - 1.5 * iqr
-        high = q75 + 1.5 * iqr
-
-        tensor = tensor.clamp(low, high) # clamp
-        tensor = (tensor - low) / (high - low) # normalize
-
-        tensor_u8 = (tensor * 255).round().to(torch.uint8)
-
-        tensor_rec = (tensor_u8.to(torch.float) / 255.0) * (high - low) + low
-
-        return (tensor_u8, tensor_rec)
-
     assert(datamodule.batch_size == 1) # prevent too big sizes in memmory
 
     datamodule.setup()
@@ -147,7 +127,7 @@ def eval_compression(model, evaluation_name, datamodule):
 
     img_comp_metrics_ours = ImageComparisonMetrics()
     img_comp_metrics_jpeg = ImageComparisonMetrics()
-    img_patcher = ImagePatcher()
+    img_patcher = ImagePatcher(patch_size=128)
 
     N_IMAGES = 4
     print("="*45)
@@ -164,21 +144,14 @@ def eval_compression(model, evaluation_name, datamodule):
         transform = transforms.ToTensor()
         patches_batch = torch.stack([transform(patch) for _, patch in patches]).to(device)
 
-        quantized_tensor = None
         with torch.no_grad():
-            bottleneck = model.encoder(patches_batch)
-
-            quantized_tensor, tensor_reconstructed = quantize_tensor(bottleneck)
-
-            reconstructions = model.decoder(tensor_reconstructed)
+            reconstructions, bottleneck = model.forward_get_latent(patches_batch)
 
         # compare compression
         buf_img = io.BytesIO()
         img.save(buf_img, format="PNG")
 
-        codec = dahuffman.HuffmanCodec.from_data(quantized_tensor.flatten().tolist())
-        encoded = codec.encode(quantized_tensor.flatten().tolist())
-        buf_compressed = io.BytesIO(encoded)
+        buf_compressed = io.BytesIO(bottleneck)
 
         img_size = buf_img.tell()
         compressed_size = buf_compressed.getbuffer().nbytes

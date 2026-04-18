@@ -32,7 +32,7 @@ def experiment1():
     EXPERIMENT_NAME = "basic_imagenet10k"
     MODEL_NAME = "basic"
     EPOCHS = 5
-    LEARNING_RATE = 5e-4
+    LEARNING_RATE = 2e-4
     
     model = get_model(MODEL_NAME, learning_rate=LEARNING_RATE)
 
@@ -63,20 +63,24 @@ def experiment1():
     print("="*30)
 
     # compute latents for quantization
+    print("Computing priors...")
     all_latents = []
     model.eval()
+    device = next(model.parameters()).device
     with torch.no_grad():
         for batch in datamodule_default_imagenet10k.train_dataloader():
+            batch = batch.to(device)
             z = model.encoder(batch)
             all_latents.append(z)
 
     all_latents = torch.cat(all_latents, dim=0)
 
-    # compute priors from latents
-    model.compute_priors(all_latents)
-
-    # save model as torch object
+    # load best model weights
     best_model = ( model.__class__).load_from_checkpoint(checkpoint_callback.best_model_path)
+    best_model.to(device)
+    # compute priors from latents
+    best_model.compute_priors(all_latents)
+    # save model as torch object
     torch.save(best_model, f"checkpoints/manual/{MODEL_NAME}_best.pt")
 
 def experiment2():
