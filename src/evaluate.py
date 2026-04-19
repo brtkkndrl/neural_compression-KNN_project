@@ -258,10 +258,15 @@ def main():
     #TODO get rid of need for crop datamodule in eval_patches
 
     # basic_model = load_model_from_checkpoint("basic", "checkpoints/basic_imagenet10k-basic-best-v1.ckpt")
-    basic_model = torch.load("checkpoints/manual/basic_best.pt", weights_only=False)
-
-    #eval_patches(basic_model, "basic_eval", datamodule_imagenet10k_crop)
-    eval_compression(basic_model, "basic_eval", datamodule_imagenet10k_no_crop)
+    
+    if False:
+        basic_model = torch.load("checkpoints/manual/basic_best.pt", weights_only=False)
+        eval_patches(basic_model, "basic_eval", datamodule_imagenet10k_crop)
+        eval_compression(basic_model, "basic_eval", datamodule_imagenet10k_no_crop)
+    else:
+        dcal_model = torch.load("checkpoints/manual/DCAL_2018_best.pt", weights_only=False)
+        eval_patches(dcal_model, "basic_eval", datamodule_imagenet10k_crop)
+        eval_compression(dcal_model, "basic_eval", datamodule_imagenet10k_no_crop)
 
     #eval_patches("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_default_concat)
     #eval_compression("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_no_crop_concat)

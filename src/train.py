@@ -13,7 +13,7 @@ torch.set_float32_matmul_precision("medium")
 
 datamodule_default_imagenet10k = ClassImagesDataModule(
     data_dir="datasets/imagenet_10K/imagenet_subtrain",
-    batch_size=8,
+    batch_size=16,
     random_crop=True,
     ycbcr=True,
     patch_size=128
@@ -87,11 +87,11 @@ def experiment1():
 
 def experiment2():
     """
-        Train a basic DCAL 2018 on DF2K..
+        Train a basic DCAL 2018 on ImageNet..
     """
     EXPERIMENT_NAME = "dcal_df2k"
     MODEL_NAME = "DCAL_2018"
-    EPOCHS = 10
+    EPOCHS = 20
     LEARNING_RATE = 1e-4
     
     model = get_model(MODEL_NAME, learning_rate=LEARNING_RATE)
@@ -116,16 +116,37 @@ def experiment2():
     print(f"Started experiment: {EXPERIMENT_NAME}")
 
     print(f"Starting training for {MODEL_NAME}...")
-    trainer.fit(model, datamodule_df2k)
+    trainer.fit(model, datamodule_default_imagenet10k)
     print(f"Training complete. Best model saved to checkpoints/{os.path.basename(checkpoint_filename)}")
 
     print(f"Finished experiment: {EXPERIMENT_NAME}")
     print("="*30)
 
+    # compute latents for quantization
+    print("Computing priors...")
+    all_latents = []
+    model.eval()
+    device = next(model.parameters()).device
+    with torch.no_grad():
+        for batch in datamodule_default_imagenet10k.train_dataloader():
+            batch = batch.to(device)
+            z = model.encoder(batch)
+            all_latents.append(z)
+
+    all_latents = torch.cat(all_latents, dim=0)
+
+    # load best model weights
+    best_model = ( model.__class__).load_from_checkpoint(checkpoint_callback.best_model_path)
+    best_model.to(device)
+    # compute priors from latents
+    best_model.compute_priors(all_latents)
+    # save model as torch object
+    torch.save(best_model, f"checkpoints/manual/{MODEL_NAME}_best.pt")
+
 def main():
    # pass
-    experiment1()
-    #experiment2()
+    #experiment1()
+    experiment2()
 
 if __name__ == "__main__":
     main()

@@ -48,22 +48,6 @@ class BasicAE(BaseAutoencoder):
         self.quantization_bits = 8 # lower -> more compression
         self.rate_coeffitient = 1.0  # higher -> more compression
         assert self.rate_coeffitient >= 0.0
-
-    def rgb_to_ycbcr(self, x):
-        r, g, b = x[0:1], x[1:2], x[2:3]
-        y  =  0.299 * r + 0.587 * g + 0.114 * b
-        cb = -0.169 * r - 0.331 * g + 0.500 * b + 0.5
-        cr =  0.500 * r - 0.419 * g - 0.081 * b + 0.5
-        return torch.cat([y, cb, cr], dim=0)
-    
-    def ycbcr_to_rgb(self, x):
-        y, cb, cr = x[0:1], x[1:2], x[2:3]
-        cb = cb - 0.5
-        cr = cr - 0.5
-        r = y + 1.402 * cr
-        g = y - 0.344 * cb - 0.714 * cr
-        b = y + 1.772 * cb
-        return torch.cat([r, g, b], dim=0).clamp(0, 1)
     
     def pass_to_encoders(self, x):
         encoded = self.encoder(x)
