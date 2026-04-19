@@ -36,6 +36,7 @@ class DataModuleBase(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.random_crop = random_crop
+        self.ycbcr = ycbcr
         self.patch_size = patch_size
 
         assert not ((not random_crop) and (batch_size > 1)), "Can't combine images of various sizes in one batch."

@@ -2,6 +2,7 @@ import os
 
 import torch
 import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchvision.utils import save_image
 
@@ -140,8 +141,11 @@ def eval_compression(model, evaluation_name, datamodule):
     for i, batch_tensor in enumerate(val_loader):
         if i+1 > N_IMAGES:
             break
-
-        img = transforms.ToPILImage()(batch_tensor[0]).convert("RGB")
+        
+        if datamodule.ycbcr:
+            img = TF.to_pil_image(batch_tensor[0], mode='YCbCr')
+        else:
+            img = TF.to_pil_image(batch_tensor[0], mode='RGB')
 
         patches = img_patcher.create_patches(img)
 
@@ -150,6 +154,15 @@ def eval_compression(model, evaluation_name, datamodule):
 
         with torch.no_grad():
             reconstructions, bottleneck = model.forward_get_latent(patches_batch)
+
+        if datamodule.ycbcr:
+            reconstructions = torch.stack([
+                TF.to_tensor(TF.to_pil_image(img, mode='YCbCr').convert('RGB'))
+                for img in reconstructions
+            ])
+
+        # at this point work with rgb original
+        img = img.convert('RGB')
 
         # compare compression
         buf_img = io.BytesIO()
@@ -204,6 +217,16 @@ def eval_patches(model, evaluation_name, datamodule):
             originals = batch.to(device)
             reconstructions = model(originals)
 
+            if datamodule.ycbcr:
+                originals = torch.stack([
+                    TF.to_tensor(TF.to_pil_image(img, mode='YCbCr').convert('RGB'))
+                    for img in originals
+                ])
+                reconstructions = torch.stack([
+                    TF.to_tensor(TF.to_pil_image(img, mode='YCbCr').convert('RGB'))
+                    for img in reconstructions
+                ])
+
             img_comp_metrics.update(reconstructions, originals)
 
             if i == 0:
@@ -239,8 +262,6 @@ def main():
 
     #eval_patches(basic_model, "basic_eval", datamodule_imagenet10k_crop)
     eval_compression(basic_model, "basic_eval", datamodule_imagenet10k_no_crop)
-    #eval_compression("basic", "checkpoints/basic_imagenet10k-basic-best.ckpt", datamodule_imagenet10k_no_crop)
-    
 
     #eval_patches("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_default_concat)
     #eval_compression("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_no_crop_concat)
