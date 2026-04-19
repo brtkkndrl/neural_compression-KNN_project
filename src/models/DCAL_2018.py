@@ -195,6 +195,11 @@ class DCAL_2018(BaseAutoencoder):
         x_hat, _= self.forward_get_latent(x)
         return x_hat
 
+    def forward_just_cae(self, x):
+        z_Y, z_Cb, z_Cr = self.encoder(x)
+        x_hat = self.decoder(z_Y, z_Cb, z_Cr)
+        return x_hat
+
     def forward_get_latent(self, x):
         z_Y, z_Cb, z_Cr = self.encoder(x)
 

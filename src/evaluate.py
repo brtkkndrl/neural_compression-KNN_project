@@ -51,8 +51,10 @@ datamodule_df2k_no_crop = DF2KDataModule(
 )
 
 class ImageComparisonMetrics:
-    def __init__(self):
+    def __init__(self, name_1, name_2):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.name_1 = name_1
+        self.name_2 = name_2
         self.reset()
 
     def reset(self):
@@ -79,6 +81,8 @@ class ImageComparisonMetrics:
         if not self.finilized:
             self.finilize()
         print("\n" + "=" * 30)
+        print(f"Image mentrics comparison | {self.name_1} vs {self.name_2}") 
+        print("=" * 30)
         print(f"Total batches: {self.num_batches}")
         print(f"MSE:  {self.avg_mse:.6f}")
         print(f"PSNR: {self.avg_psnr:.2f} dB")
@@ -204,41 +208,51 @@ def eval_patches(model, evaluation_name, datamodule):
 
     print("Running evaluation by patches... \n")
 
-    img_comp_metrics = ImageComparisonMetrics()
+    metrics_compressed = ImageComparisonMetrics("original", "recovered (compressed)")
+    metrics_just_cae = ImageComparisonMetrics("original", "recovered (no compression)")
 
     first_batch_originals = torch.empty(0)
-    first_batch_reconstructions = torch.empty(0)
+    first_batch_recs_compressed = torch.empty(0)
+    first_batch_recs_just_cae = torch.empty(0)
 
     device = next(model.parameters()).device
 
     print("Evaluating model over the validation set...")
     with torch.no_grad():
         for i, batch in enumerate(val_loader):
-            if i*datamodule.batch_size > 100:
+            if i >= 50:
                 break
 
             originals = batch.to(device)
-            reconstructions = model(originals)
+            recs_compress = model(originals)
+            recs_just_cae = model.forward_just_cae(originals)
 
             if datamodule.ycbcr:
                 originals = torch.stack([
                     TF.to_tensor(TF.to_pil_image(img, mode='YCbCr').convert('RGB'))
                     for img in originals
                 ])
-                reconstructions = torch.stack([
+                recs_compress = torch.stack([
                     TF.to_tensor(TF.to_pil_image(img, mode='YCbCr').convert('RGB'))
-                    for img in reconstructions
+                    for img in recs_compress
+                ])
+                recs_just_cae = torch.stack([
+                    TF.to_tensor(TF.to_pil_image(img, mode='YCbCr').convert('RGB'))
+                    for img in recs_just_cae
                 ])
 
-            img_comp_metrics.update(reconstructions, originals)
+            metrics_compressed.update(recs_compress, originals)
+            metrics_just_cae.update(recs_just_cae, originals)
 
             if i == 0:
                 first_batch_originals = originals
-                first_batch_reconstructions = reconstructions
+                first_batch_recs_compressed = recs_compress
+                first_batch_recs_just_cae = recs_just_cae
 
-    img_comp_metrics.print_summary()
+    metrics_just_cae.print_summary()
+    metrics_compressed.print_summary()
 
-    comparison = torch.cat([first_batch_originals, first_batch_reconstructions])
+    comparison = torch.cat([first_batch_originals, first_batch_recs_just_cae, first_batch_recs_compressed])
     save_path = f"outputs/{evaluation_name}_comparison.png"
     save_image(comparison, save_path, nrow=first_batch_originals.shape[0])
     print(f"Image saved to {save_path}")
@@ -269,7 +283,7 @@ def main():
     else:
         dcal_model = torch.load("checkpoints/manual/DCAL_2018_best_50epoch.pt", weights_only=False)
         eval_patches(dcal_model, "basic_eval", datamodule_imagenet10k_crop)
-        eval_compression(dcal_model, "basic_eval", datamodule_imagenet10k_no_crop)
+        # eval_compression(dcal_model, "basic_eval", datamodule_imagenet10k_no_crop)
 
     #eval_patches("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_default_concat)
     #eval_compression("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_no_crop_concat)
