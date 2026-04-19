@@ -57,14 +57,25 @@ In this section, we review prior research in the field of learned image compress
 
 \subsection{Convolutional Autoencoder Compression}
 
-Researchers \cite{cheng_deep_2018} built a symmetric convolutional autoencoder structure with multiple downsampling and upsampling units to generate feature maps with low dimensions. The encoder part was a pipeline transforming the source RGB image to YCbCr format and normalizing it to the range $[0,1]$. The image then went into the CAE network block, which enveloped both the encoder and decoder pipelines. The CAE itself was made up of 3 downsampling units in the first part, each consisting of 2 convolutional layers. Each convolution was followed by a PReLU activation. During training, a uniform noise was added to the latent vector, imitating the effect of the quantizer present at inference time, which was not differentiable and thus could not be used directly during training. The output of the pre-trained CAE thus utilized a PCA rotation to produce more zeros, improving efficiency. Subsequently, 12-bit quantization and the entropy coder were used to compress the data further. The model itself always expected a 128x128x1 tensor in, and outputted a 16x16x32 feature map out. To achieve compression on larger image sizes, they sliced the images into patches and ran the CAE independently on each slice. Their results outperformed conventional image coding algorithms and achieved a 13.7\% BD-rate saving compared to JPEG2000 on the Kodak dataset. Their average running time, however, was 80ms longer on GPU and 1700ms longer on CPU than with JPEG2000. 
+Researchers \cite{cheng_deep_2018} built a symmetric convolutional autoencoder structure with multiple downsampling and upsampling units to generate feature maps with low dimensions. The encoder part was a pipeline transforming the source RGB image to YCbCr format and normalizing it to the range $[0,1]$. The image then went into the CAE network block, which encapsulated both the encoder and decoder pipelines. The CAE itself comprised 3 downsampling units in the first part, each consisting of 2 convolutional layers. Each convolution was followed by a PReLU activation. During training, uniform noise was added to the latent vector, imitating the effect of the quantizer present at inference time, which was not differentiable and thus could not be used directly during training. An approximated rate-distortion was used as the loss function:
+\begin{equation}
+    J(\theta, \phi; x) = \|x - \hat{x}\|^2 + \lambda \cdot \|y\|^2
+    \label{eq:cae_loss}
+\end{equation}
+
+\noindent where $\|x - \hat{x}\|^2$ was the MSE between the original $x$ 
+and the reconstructed $\hat{x} = g_\phi(f_\theta(x) + \mu)$ image, with $\mu$ being the 
+uniform noise. 
+The term $\|y\|^2 = \|f_\theta(x)\|^2$ penalized the amplitude of the latent vector, 
+acting as a proxy for the bitrate. The scalar $\lambda$ controlled the rate-distortion 
+tradeoff. The model was optimized using Adam with a fixed learning rate of $10^{-4}$. The output of the pre-trained CAE utilized a PCA rotation to produce more zeros, improving efficiency. Subsequently, 12-bit quantization and the entropy coder were used to compress the data further. The model itself always expected a 128x128x1 tensor as input and outputted a 16x16x32 feature map. To achieve compression on larger image sizes, they sliced the images into patches and ran the CAE independently on each slice. Their results outperformed conventional image coding algorithms and achieved a 13.7\% BD-rate saving compared to JPEG2000 on the Kodak dataset. Their average running time, however, was 80 ms longer on GPU and 1700 ms longer on CPU than with JPEG2000. 
 
 
 \section{Evaluation}
-We describe the datasets used for the training of our compression models and the ways in which we evaluate them.
+We describe the datasets used for training our compression models and the ways in which we evaluate them.
 
 \subsection{Datasets}
-In this work, we aim to train a compression model for common images. With this in mind, our models have to handle pictures taken with consumer smartphones. As such, the chosen datasets contain images with resolutions of at least about 400 pixels on average. Additionally, the datasets must contain enough pictures to prevent overfitting of the models.
+In this work, we aim to train a compression model for common images. With this in mind, our models have to handle pictures taken with consumer smartphones. As such, the chosen datasets contain images with resolutions of at least 400 pixels on average. Additionally, the datasets must contain enough pictures to prevent overfitting of the models.
 
 \paragraph{ImageNet 10k}
 ImageNet is an image dataset organized according to concepts constructed from the WordNet hierarchy. Each concept category is, on average, represented by about 1000 images \cite{noauthor_imagenet_nodate-1}.
@@ -73,6 +84,9 @@ For basic experiments, we use a subset of the dataset. The ImageNet 10k dataset 
 
 \paragraph{Flickr-Faces-HQ small}
 The Flickr Faces dataset contains high-quality images of human faces. It offers 70,000 PNG images at 1024×1024 resolution that display diverse ages, ethnicities, image backgrounds, and accessories like hats and eyeglasses \cite{noauthor_flickr-faces-hq_nodate}.
+
+\paragraph{Div2K High Resolution Images}
+The Div2K is a large dataset with a diverse range of contents. It is split into various categories of image quality, of which we only use the high resolution subset (of around 2k resolution) \cite{noauthor_div2k_nodate}. 
 
 \subsection{Metrics}
 We evaluate the models based on various metrics, such as compression strength, reconstruction quality, and compute cost.
@@ -127,9 +141,9 @@ For ease of use, we propose a harness that allows for seamless swapping of diffe
 
 First, the $data.py$ file defines the various datasets we use, each as its own subclass of the PyTorch Lightning \cite{noauthor_pytorch_nodate} library $LightningDataModule$, achieving seamless integration within the main training code. Batch size and the number of workers for batch preparation are defined for each module. Additionally, we set whether we want the images to be scaled to a fixed size or cut into patches. By splitting each image into sub-parts, we allow the model to learn from more examples and prevent overfitting. Multiple datasets can be concatenated as well. Inside the class, we also define the separate train, test, and validation sets. 
 
-The $train.py$ file describes the main training pipeline, containing experiments that combine datasets with models. PyTorch Lightning then takes care of the training process.
+The $train.py$ file describes the main training pipeline, which contains experiments that combine datasets with models. PyTorch Lightning then takes care of the training process.
 
-Models are built on top of a base autoencoder module in the $base.py$ file, implementing training and validation steps, all built on top of $LightningModule$. The concrete model architecture is then implemented in its own $.py$ file, inheriting the $BaseAutoencoder$ class and usually implementing the encoder, decoder, and forward pass parts of the model.
+Models are built on top of a base autoencoder module in the $base.py$ file, implementing training and validation steps, all built on top of $LightningModule$. The concrete model architecture is then implemented in its own $.py$ file, inheriting the $BaseAutoencoder$ class and usually implementing the encoder, decoder, and forward pass components of the model.
 
 Evaluation is then performed via the $evaluate.py$ file, which loads dataset modules, compression metrics, and performs the compression and decompression of images with a specified trained model. 
 Each image is sliced into parts, with each part compressed individually. After subsequent decompression, the slices are merged together to reconstruct the original image. The slicing algorithm creates non-overlapping slices that, during compression, leave the model without the context of the surrounding area.
@@ -138,10 +152,10 @@ During encoding, the model output is quantized, where outliers are clamped to an
 
 Decoding part of the process maps the 8-bit values back to the $[0, 1]$ range of the model, runs them through the decoder, and performs the stitching of the slices back into a single image.
 
-Based on the decompressed image, MSE, PSNR, and SSIM metrics are calculated.
+Based on the decompressed image, the MSE, PSNR, and SSIM metrics are calculated.
 
 \subsection{Model Architecture}
-The proposed model is a convolutional autoencoder consisting of two symmetric subnetworks: an encoder that progressively compresses the input into a compact latent representation, and a decoder that reconstructs the original input from that representation. The full model, \texttt{BasicAE}, is implemented as a PyTorch Lightning module inheriting from a shared \texttt{BaseAutoencoder} base class.
+The proposed model is a convolutional autoencoder consisting of two symmetric subnetworks: an encoder that progressively compresses the input into a compact latent representation and a decoder that reconstructs the original input from that representation. The full model, \texttt{BasicAE}, is implemented as a PyTorch Lightning module inheriting from a shared \texttt{BaseAutoencoder} base class.
 
 The encoder accepts RGB images and applies four successive strided convolutional layers with kernel size $3 \times 3$, stride 2, and padding 1. Each layer doubles the number of feature channels while halving the spatial dimensions, yielding channel depths of 16, 32, 64, and 128 respectively. ReLU activations follow each convolution. For a $256 \times 256$ input, the resulting latent tensor has shape $128 \times 16 \times 16$. The latent space retains spatial structure rather than collapsing to a flat vector, preserving spatial relationships for the decoder to exploit during reconstruction.
 
@@ -157,7 +171,18 @@ Parameters are optimized using the Adam optimizer with a default learning rate o
 
 
 \section{Conclusion}
-Note how model based compression requires more processing power at inference, also showing differences between architectures, differing based on if CPU or GPU was used \cite{cheng_deep_2018}... 
+Model based compression requires more processing power at inference, also showing differences between architectures, depending on whether a CPU or GPU is used \cite{cheng_deep_2018}... 
+
+
+\section{Future Work}
+We aim to model a size-agnostic architecture for image compression that would work for varying image sizes, with the latent vector changing in size as a result. We consider using a fully convolutional network, which would be trained on smaller slices of, for example, 256x256 pixels, to make the model learn compression quickly on a large number of examples. During inference, images of various sizes would be compressed and examined.
+
+To improve the rate–distortion tradeoff, a hyper-encoder block can be trained to output a hyperprior which, when provided to the entropy coder alongside the latent vector, enables it to differentiate between fine-grained textures and monotone structures, thereby reducing coding entropy and allowing lower distortion at a given bitrate.
+
+Alternatively, replacing the PCA rotation and quantization stage of our reproduced base model inspired by \cite{cheng_deep_2018} with a vector quantization (VQ) bottleneck \cite{oord_neural_2018} could allow quantization to be optimized jointly with the rest of the model. Furthermore, the PCA rotation would become redundant, as the codebook could learn optimal discrete representations directly. The resulting bitstream would consist of integer codebook indices rather than quantized floats, simplifying the entropy coding stage.
+
+As human vision is more sensitive to changes in brightness than to changes in color, by converting our images to YCbCr format, we could implement chroma subsampling. Full resolution would only be given to the luminance channel, with the chroma channels downsampled.
+
 
 
 \section*{Source Code}
