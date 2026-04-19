@@ -312,7 +312,7 @@ def main():
         eval_patches(basic_model, "basic_eval", datamodule_imagenet10k_crop)
         eval_compression(basic_model, "basic_eval", datamodule_imagenet10k_no_crop)
     else:
-        dcal_model = torch.load("checkpoints/manual/DCAL_2018_best_50epoch.pt", weights_only=False)
+        dcal_model = torch.load("checkpoints/manual/DCAL_2018_best.pt", weights_only=False)
         eval_patches(dcal_model, "basic_eval", datamodule_imagenet10k_crop)
         eval_compression(dcal_model, "basic_eval", datamodule_imagenet10k_no_crop)
 

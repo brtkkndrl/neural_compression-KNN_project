@@ -175,8 +175,14 @@ class DCAL_2018(BaseAutoencoder):
 
         x_hat = self.decoder(z_y, z_cb, z_cr)
 
-        # TODO can weight component loss differently
         loss = F.mse_loss(x_hat, x) + self.rate_coeffitient*torch.mean(z ** 2)
+
+        # hat_Y, hat_Cb, hat_Cr = torch.split(x_hat, 1, dim=1)
+        # x_Y, x_Cb, x_Cr = torch.split(x, 1, dim=1)
+        # loss = (    (6.0/8) * F.mse_loss(hat_Y, x_Y)
+        #             + (1.0/8) * F.mse_loss(hat_Cb, x_Cb)
+        #             + (1.0/8) * F.mse_loss(hat_Cr, x_Cr)
+        #             + self.rate_coeffitient*torch.mean(z ** 2) )
         
         self.log("train_loss", loss, prog_bar=True)
         return loss
@@ -189,6 +195,13 @@ class DCAL_2018(BaseAutoencoder):
         x_hat = self.decoder(z_y, z_cb, z_cr)
 
         loss = F.mse_loss(x_hat, x) + self.rate_coeffitient*torch.mean(z ** 2)
+
+        # hat_Y, hat_Cb, hat_Cr = torch.split(x_hat, 1, dim=1)
+        # x_Y, x_Cb, x_Cr = torch.split(x, 1, dim=1)
+        # loss = (    (6.0/8) * F.mse_loss(hat_Y, x_Y)
+        #     + (1.0/8) * F.mse_loss(hat_Cb, x_Cb)
+        #     + (1.0/8) * F.mse_loss(hat_Cr, x_Cr)
+        #     + self.rate_coeffitient*torch.mean(z ** 2) )
         self.log("val_loss", loss, prog_bar=True)
 
     def forward(self, x):
@@ -209,44 +222,53 @@ class DCAL_2018(BaseAutoencoder):
         z_rot_Cr, U_Cr = self.pca_rotation(z_Cr)
 
         # Truncation
-        # z_rot_Y[:, -12:] = 0
-        # z_rot_Cb[:, -24:] = 0
-        # z_rot_Cr[:, -24:] = 0
+        z_rot_Y[:, -12:] = 0
+        z_rot_Cb[:, -26:] = 0
+        z_rot_Cr[:, -26:] = 0
 
         # Quantization
         z_quant_Y = self.quantizer(z_rot_Y)
         z_quant_Cb = self.quantizer(z_rot_Cb)
         z_quant_Cr = self.quantizer(z_rot_Cr)
 
-        # Entropy coding
-        z_quant = torch.cat([z_quant_Y, z_quant_Cb, z_quant_Cr], dim=1)
+        U_quant_Y = self.quantizer(U_Y)
+        U_quant_Cb = self.quantizer(U_Cb)
+        U_quant_Cr = self.quantizer(U_Cr)
 
-        z_compressed_data = None
+        # Entropy coding
+        U_quant_join = torch.cat([U_quant_Y, U_quant_Cb, U_quant_Cr], dim=1)
+        z_quant_join = torch.cat([z_quant_Y, z_quant_Cb, z_quant_Cr], dim=1)
+
+        payload = np.concatenate([z_quant_join.cpu().numpy().astype(np.int32).flatten(),
+                                  U_quant_join.cpu().numpy().astype(np.int32).flatten()])
+
         USE_FANCY_COMPRESSION = False
         if USE_FANCY_COMPRESSION:
-            z_compressed = self.entropy_coder(z_quant)
-            original_shape = z_quant.shape
-            z_decompressed = self.entropy_decoder(z_compressed, original_shape)
+            z_compressed = self.entropy_coder(z_quant_join)
+            # original_shape = z_quant_join.shape
+            # z_decompressed = self.entropy_decoder(z_compressed, original_shape)
             #
-            z_compressed_data = z_compressed.tobytes()
+            compressed_payload = z_compressed.tobytes()
             #
         else:
-            symbols = z_quant.cpu().numpy().astype(np.int32).flatten()
-            codec = dahuffman.HuffmanCodec.from_data(symbols)
-            z_compressed = codec.encode(symbols)
-            z_decompressed = torch.tensor(codec.decode(z_compressed), dtype=torch.int32).reshape(z_quant.shape).to(next(self.parameters()).device)
-            z_compressed_data = z_compressed
+            codec = dahuffman.HuffmanCodec.from_data(payload)
+            compressed_payload = codec.encode(payload)
+            # z_decompressed = torch.tensor(codec.decode(z_compressed), dtype=torch.int32).reshape(z_quant_join.shape).to(next(self.parameters()).device)
 
 
         # De-quantization
+        U_rec_Y = self.dequantizer(U_quant_Y)
+        U_rec_Cb = self.dequantizer(U_quant_Cb)
+        U_rec_Cr = self.dequantizer(U_quant_Cr)
+
         z_rec_Y = self.dequantizer(z_quant_Y)
         z_rec_Cb = self.dequantizer(z_quant_Cb)
         z_rec_Cr = self.dequantizer(z_quant_Cr)
         # PCA inverse rotation
-        z_inv_pca_Y = self.pca_inverse(z_rec_Y, U_Y)
-        z_inv_pca_Cb = self.pca_inverse(z_rec_Cb, U_Cb)
-        z_inv_pca_Cr = self.pca_inverse(z_rec_Cr, U_Cr)
+        z_inv_pca_Y = self.pca_inverse(z_rec_Y, U_rec_Y)
+        z_inv_pca_Cb = self.pca_inverse(z_rec_Cb, U_rec_Cb)
+        z_inv_pca_Cr = self.pca_inverse(z_rec_Cr, U_rec_Cr)
 
         x_hat = self.decoder(z_inv_pca_Y, z_inv_pca_Cb, z_inv_pca_Cr)
 
-        return (x_hat, z_compressed_data)
+        return (x_hat, compressed_payload)

@@ -92,7 +92,7 @@ def experiment2():
     """
     EXPERIMENT_NAME = "dcal_df2k"
     MODEL_NAME = "DCAL_2018"
-    EPOCHS = 50
+    EPOCHS = 20 
     LEARNING_RATE = 1e-4
     
     model = get_model(MODEL_NAME, learning_rate=LEARNING_RATE)
