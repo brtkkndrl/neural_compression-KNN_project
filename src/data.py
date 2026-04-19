@@ -30,55 +30,52 @@ class DatasetFolder(Dataset):
             image = self.transform(image)
         return image
 
-class ImageNetSubsetDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, batch_size=8, num_workers=2, image_size=256, train_limit=None, val_limit=None):
+class DataModuleBase(pl.LightningDataModule):
+    def __init__(self, random_crop, ycbcr, batch_size=64, num_workers=4, patch_size=256):
         super().__init__()
-        self.train_dataset = None
-        self.val_dataset = None
-        self.data_dir = Path(data_dir)
-        self.train_dir = self.data_dir / "train"
-        self.val_dir = self.data_dir / "val"
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.image_size = image_size
-        self.train_limit = train_limit
-        self.val_limit = val_limit
-        self.transform = transforms.Compose([
-            transforms.Resize((self.image_size, self.image_size)),
-            transforms.ToTensor(),
-        ])
-
-    def setup(self, stage=None):
-        train_dataset = DatasetFolder(self.train_dir, transform=self.transform)
-        val_dataset = DatasetFolder(self.val_dir, transform=self.transform)
-        self.train_dataset = subset_dataset(train_dataset, self.train_limit)
-        self.val_dataset = subset_dataset(val_dataset, self.val_limit)
-
-    def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
-
-    def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-
-class ClassImagesDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, batch_size=64, num_workers=4, patch_size = 256, random_crop = True):
-        super().__init__()
-        self.data_dir = data_dir
-        self.batch_size = batch_size
-        self.num_workers = num_workers
+        self.random_crop = random_crop
+        self.ycbcr = ycbcr
         self.patch_size = patch_size
 
-        if random_crop:
-            self.transform = transforms.Compose([
-                transforms.RandomCrop((self.patch_size, self.patch_size)),
-                transforms.ToTensor(),
-            ])
-        else:
-            self.transform = transforms.Compose([
-                transforms.ToTensor(),
-            ])
+        assert not ((not random_crop) and (batch_size > 1)), "Can't combine images of various sizes in one batch."
 
+        t = []
+        if random_crop:
+            t.append(transforms.RandomCrop((self.patch_size, self.patch_size)))
+        if ycbcr:
+            t.append(transforms.Lambda(lambda x: x.convert('YCbCr')))
+        t.append(transforms.ToTensor())
+
+        self.transform = transforms.Compose(t)
+        
         self.collate_fn=lambda batch: torch.stack([img for img, _ in batch])
+
+    def setup(self, x):
+        raise NotImplementedError("Subclasses must implement this method.")
+
+    def train_dataloader(self):
+        assert hasattr(self, 'train_ds')
+        return DataLoader(self.train_ds, batch_size=self.batch_size, shuffle=True,
+                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
+
+    def val_dataloader(self):
+        assert hasattr(self, 'val_ds')
+        return DataLoader(self.val_ds, batch_size=self.batch_size, shuffle=False,
+                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
+
+    def test_dataloader(self):
+        assert hasattr(self, 'test_ds')
+        return DataLoader(self.test_ds, batch_size=self.batch_size, shuffle=False,
+                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
+
+class ClassImagesDataModule(DataModuleBase):
+    def __init__(self, data_dir, random_crop, ycbcr, batch_size=64, num_workers=4, patch_size = 256):
+        super().__init__(random_crop = random_crop, ycbcr=ycbcr,
+                        batch_size=batch_size, num_workers=num_workers, patch_size=patch_size)
+
+        self.data_dir = data_dir
 
     def setup(self, stage=None):
         dataset = ImageFolder(self.data_dir, transform=self.transform)
@@ -92,90 +89,22 @@ class ClassImagesDataModule(pl.LightningDataModule):
             dataset, [0.8, 0.1, 0.1],
             generator=torch.Generator().manual_seed(42)
         )
-
-    def train_dataloader(self):
-        return DataLoader(self.train_ds, batch_size=self.batch_size, shuffle=True,
-                            num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
-
-    def val_dataloader(self):
-        return DataLoader(self.val_ds,   batch_size=self.batch_size, shuffle=False,
-                           num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
-
-    def test_dataloader(self):
-        return DataLoader(self.test_ds,  batch_size=self.batch_size, shuffle=False,
-                           num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
     
-class Div2KDataModule(pl.LightningDataModule):
-    def __init__(self, train_dir, val_dir, batch_size=64, num_workers=4, patch_size=256, random_crop=True):
-        super().__init__()
+class DF2KDataModule(DataModuleBase):
+    def __init__(self, train_dir, test_dir, random_crop, ycbcr, batch_size=64, num_workers=4, patch_size = 256):
+        super().__init__(random_crop = random_crop, ycbcr=ycbcr,
+                batch_size=batch_size, num_workers=num_workers, patch_size=patch_size)
+        
         self.train_dir = train_dir
-        self.val_dir = val_dir
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.patch_size = patch_size
-
-        if random_crop:
-            self.transform = transforms.Compose([
-                transforms.RandomCrop((self.patch_size, self.patch_size)),
-                transforms.ToTensor(),
-            ])
-        else:
-            self.transform = transforms.Compose([
-                transforms.ToTensor(),
-            ])
-
-        self.collate_fn = lambda batch: torch.stack([img for img, _ in batch])
+        self.test_dir = test_dir
 
     def setup(self, stage=None):
         train_dataset = ImageFolder(self.train_dir, transform=self.transform)
-        val_dataset   = ImageFolder(self.val_dir,   transform=self.transform)
+        test_dataset   = ImageFolder(self.test_dir,   transform=self.transform)
 
-        self.train_ds = train_dataset
-        # split validation into validation and test
-        n = len(val_dataset)
-        self.val_ds, self.test_ds = random_split(
-            val_dataset, [n // 2, n - n // 2],
+        self.test_ds = test_dataset
+        
+        self.train_ds, self.val_ds = random_split(
+            train_dataset, [0.9, 0.1],
             generator=torch.Generator().manual_seed(42)
         )
-
-    def train_dataloader(self):
-        return DataLoader(self.train_ds, batch_size=self.batch_size, shuffle=True,
-                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
-
-    def val_dataloader(self):
-        return DataLoader(self.val_ds, batch_size=self.batch_size, shuffle=False,
-                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
-
-    def test_dataloader(self):
-        return DataLoader(self.test_ds, batch_size=self.batch_size, shuffle=False,
-                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
-    
-class ConcatDatasetsDataModule(pl.LightningDataModule):
-    def __init__(self, datamodules = [], batch_size=64, num_workers=4, patch_size=256):
-        super().__init__()
-        assert isinstance(datamodules, list)
-        assert len(datamodules) > 1
-        assert all(isinstance(dm, pl.LightningDataModule) for dm in datamodules)
-
-        self.datamodules = datamodules
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.collate_fn = lambda batch: torch.stack([img for img, _ in batch])
-
-    def setup(self, stage=None):
-        for dm in self.datamodules:
-            dm.setup(stage)
-
-        assert all(hasattr(dm, "train_ds") for dm in self.datamodules)
-        assert all(hasattr(dm, "val_ds") for dm in self.datamodules)
-
-        self.train_ds = ConcatDataset([dm.train_ds for dm in self.datamodules])
-        self.val_ds   = ConcatDataset([dm.val_ds   for dm in self.datamodules])
-
-    def train_dataloader(self):
-        return DataLoader(self.train_ds, batch_size=self.batch_size, shuffle=True,
-                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)
-
-    def val_dataloader(self):
-        return DataLoader(self.val_ds, batch_size=self.batch_size, shuffle=False,
-                          num_workers=self.num_workers, pin_memory=True, collate_fn=self.collate_fn)

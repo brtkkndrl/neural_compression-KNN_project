@@ -2,6 +2,7 @@ import os
 
 import torch
 import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 from torchvision.utils import save_image
 
@@ -10,7 +11,7 @@ import io
 from torchvision import transforms
 import dahuffman
 
-from data import ImageNetSubsetDataModule, ClassImagesDataModule, Div2KDataModule, ConcatDatasetsDataModule
+from data import DF2KDataModule, ClassImagesDataModule
 
 from models import get_model
 
@@ -18,41 +19,50 @@ import argparse
 
 OUTPUT_DIR = "outputs"
 
-datamodule_default_div2k = Div2KDataModule(
-    train_dir="../datasets/DIV2K_train_HR",
-    val_dir="../datasets/DIV2K_train_HR",
-    batch_size=8
-)
+def get_jpeg_image(img):
+    buf_jpeg = io.BytesIO()
+    img.save(buf_jpeg, format="JPEG", quality=95)
+    jpeg_size = buf_jpeg.tell()
+    buf_jpeg.seek(0)
+    jpeg_img = Image.open(buf_jpeg)
+    return jpeg_img, jpeg_size
 
-datamodule_default_imagenet10k = ClassImagesDataModule(
-    data_dir="../datasets/imagenet_subtrain",
+datamodule_imagenet10k_crop = ClassImagesDataModule(
+    data_dir="datasets/imagenet_10K/imagenet_subtrain",
     batch_size=8,
-    random_crop=True
+    random_crop=True,
+    ycbcr=True,
+    patch_size=128
 )
 
-datamodule_no_crop_imagenet10k = ClassImagesDataModule(
-    data_dir="../datasets/imagenet_subtrain",
+datamodule_imagenet10k_no_crop = ClassImagesDataModule(
+    data_dir="datasets/imagenet_10K/imagenet_subtrain",
     batch_size=1,
-    random_crop=False
+    random_crop=False,
+    ycbcr=True,
 )
 
-datamodule_default_concat = ConcatDatasetsDataModule(
-    [datamodule_default_div2k, datamodule_default_imagenet10k],
-    batch_size=8
+datamodule_df2k_crop = DF2KDataModule(
+    train_dir="datasets/DF2K/train",
+    test_dir="datasets/DF2K/test",
+    batch_size=8,
+    random_crop=True,
+    ycbcr=True,
 )
 
-datamodule_no_crop_concat = ConcatDatasetsDataModule(
-    [
-        Div2KDataModule(train_dir="../datasets/DIV2K_train_HR",
-                      val_dir="../datasets/DIV2K_train_HR", random_crop=False),
-        ClassImagesDataModule(data_dir="../datasets/imagenet_subtrain", random_crop=False)
-    ],
-    batch_size=1
+datamodule_df2k_no_crop = DF2KDataModule(
+    train_dir="datasets/DF2K/train",
+    test_dir="datasets/DF2K/test",
+    batch_size=1,
+    random_crop=False,
+    ycbcr=True,
 )
 
 class ImageComparisonMetrics:
-    def __init__(self):
+    def __init__(self, name_1, name_2):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.name_1 = name_1
+        self.name_2 = name_2
         self.reset()
 
     def reset(self):
@@ -79,6 +89,8 @@ class ImageComparisonMetrics:
         if not self.finilized:
             self.finilize()
         print("\n" + "=" * 30)
+        print(f"Image mentrics comparison | {self.name_1} vs {self.name_2}") 
+        print("=" * 30)
         print(f"Total batches: {self.num_batches}")
         print(f"MSE:  {self.avg_mse:.6f}")
         print(f"PSNR: {self.avg_psnr:.2f} dB")
@@ -86,7 +98,8 @@ class ImageComparisonMetrics:
         print("=" * 30 + "\n")
 
 class ImagePatcher:
-    def __init__(self):
+    def __init__(self, patch_size):
+        self.patch_size = patch_size
         pass
     
     def create_patches(self, img):
@@ -95,7 +108,7 @@ class ImagePatcher:
         Returns:
             list: list of tuples ((x,y), image_data)
         """
-        patch_size = 256
+        patch_size = self.patch_size
 
         # pad to create non-overlaping patches
         pad_w = (patch_size - img.size[0] % patch_size) % patch_size
@@ -119,28 +132,42 @@ class ImagePatcher:
             reconstructed.paste(patch, (x, y))
         return reconstructed
 
-def eval_compression(model_name, model_checkpoint, datamodule):
-    def quantize_tensor(tensor):
-        """
-            Quantizes tensor using IQR.
-            Returns:
-                tuple: (quantized, reversed)
-        """
-        q25 = torch.quantile(tensor, 0.25)
-        q75 = torch.quantile(tensor, 0.75)
-        iqr = q75 - q25
-        low  = q25 - 1.5 * iqr
-        high = q75 + 1.5 * iqr
+class ImageCompressionMetric:
+    _psnr_fn = PeakSignalNoiseRatio(data_range=1.0)
 
-        tensor = tensor.clamp(low, high) # clamp
-        tensor = (tensor - low) / (high - low) # normalize
+    def __init__(self, img_name, img_before, compressed, img_after):
+        self.img_name = img_name
+        self.dims = img_before.size
 
-        tensor_u8 = (tensor * 255).round().to(torch.uint8)
+        buf_img = io.BytesIO()
+        img_before.save(buf_img, format="PNG")
+        buf_compressed = io.BytesIO(compressed)
+        self.size_before = buf_img.tell()
+        self.size_after = buf_compressed.getbuffer().nbytes
+        self.ratio = self.size_before / self.size_after
+        self.bpp = (self.size_after*8.0) / (self.dims[0]*self.dims[1])
 
-        tensor_rec = (tensor_u8.to(torch.float) / 255.0) * (high - low) + low
 
-        return (tensor_u8, tensor_rec)
+        jpeg_img, jpeg_size = get_jpeg_image(img_before)
+        self.jpeg_ratio = self.size_before/jpeg_size
 
+        self.psnr = self._psnr_fn(transforms.ToTensor()(img_before).unsqueeze(0), 
+                   transforms.ToTensor()(img_after).unsqueeze(0))
+        
+        self.psnr_jpeg = self._psnr_fn(transforms.ToTensor()(img_before).unsqueeze(0), 
+            transforms.ToTensor()(jpeg_img).unsqueeze(0))
+
+    def print_summary(self):
+        print("\n" + "=" * 30)
+        print(f"{self.img_name}: {self.dims[0]}x{self.dims[1]}")
+        print(f"{self.bpp:>0.2f} bpp | {self.size_before//1024} KB -> {self.size_after//1024} KB")
+        print(f"{self.ratio:>0.2f}x (jpeg: {self.jpeg_ratio:>0.2f}x)")
+        print(f"PSNR: {self.psnr:>0.2f} (jpeg: {self.psnr_jpeg:>0.2f})")
+        print("=" * 30)
+
+
+
+def eval_compression(model, evaluation_name, datamodule):
     assert(datamodule.batch_size == 1) # prevent too big sizes in memmory
 
     datamodule.setup()
@@ -148,84 +175,120 @@ def eval_compression(model_name, model_checkpoint, datamodule):
     
     print("Running evaluation of compression...\n")
 
-    print(f"Loading {model_name} from {model_checkpoint}...")
-    model_class = get_model(model_name).__class__
-    model = model_class.load_from_checkpoint(model_checkpoint)
+    device = next(model.parameters()).device
 
-    model.eval()
-    model.freeze()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
+    img_comp_metrics_ours = ImageComparisonMetrics("orignal", "compressed (ours)")
+    img_comp_metrics_jpeg = ImageComparisonMetrics("original", "compressed (jpeg)")
+    img_patcher = ImagePatcher(patch_size=128)
 
-    img_comp_metrics_ours = ImageComparisonMetrics()
-    img_comp_metrics_jpeg = ImageComparisonMetrics()
-    img_patcher = ImagePatcher()
+    compression_metrics = []
 
-    N_IMAGES = 4
-    print("="*45)
-    print(f"{"i"}\t{'Image size'}\t{'Size before'}\t{'Size after'}\t{'ratio'}\t{'jpeg_ratio'}")
-    print("="*45)
+    N_IMAGES = 30
+    N_SAVE = 5
     for i, batch_tensor in enumerate(val_loader):
         if i+1 > N_IMAGES:
             break
-
-        img = transforms.ToPILImage()(batch_tensor[0]).convert("RGB")
+        
+        if datamodule.ycbcr:
+            img = TF.to_pil_image(batch_tensor[0], mode='YCbCr')
+        else:
+            img = TF.to_pil_image(batch_tensor[0], mode='RGB')
 
         patches = img_patcher.create_patches(img)
 
         transform = transforms.ToTensor()
         patches_batch = torch.stack([transform(patch) for _, patch in patches]).to(device)
 
-        quantized_tensor = None
         with torch.no_grad():
-            bottleneck = model.encoder(patches_batch)
+            reconstructions, bottleneck = model.forward_get_latent(patches_batch)
 
-            quantized_tensor, tensor_reconstructed = quantize_tensor(bottleneck)
+        if datamodule.ycbcr:
+            reconstructions = torch.stack([
+                TF.to_tensor(TF.to_pil_image(img, mode='YCbCr').convert('RGB'))
+                for img in reconstructions
+            ])
 
-            reconstructions = model.decoder(tensor_reconstructed)
 
-        # compare compression
-        buf_img = io.BytesIO()
-        img.save(buf_img, format="PNG")
 
-        codec = dahuffman.HuffmanCodec.from_data(quantized_tensor.flatten().tolist())
-        encoded = codec.encode(quantized_tensor.flatten().tolist())
-        buf_compressed = io.BytesIO(encoded)
-
-        img_size = buf_img.tell()
-        compressed_size = buf_compressed.getbuffer().nbytes
-        ratio = img_size / compressed_size
-
-        buf_jpeg = io.BytesIO()
-        img.save(buf_jpeg, format="JPEG", quality=95)
-        jpeg_size = buf_jpeg.tell()
-        buf_jpeg.seek(0)
-        jpeg_img = Image.open(buf_jpeg)
-
-        jpeg_ratio = img_size/jpeg_size
-
-        print(f"{i}\t{img.size[0]}x{img.size[1]}\t{img_size//1024} KB \t{compressed_size//1024} KB \t{ratio:>15.2f}x \t {jpeg_ratio:>15.2}x")
+        # at this point work with rgb original
+        img = img.convert('RGB')
 
         reconstructed = img_patcher.combine_patches(img.size,
                         [(x,y) for (x,y), _ in patches],
                         [transforms.ToPILImage()(r.cpu()) for r in reconstructions])
-
+        
         img_comp_metrics_ours.update(transform(img).unsqueeze(0), transform(reconstructed).unsqueeze(0))
+        jpeg_img, _ = get_jpeg_image(img)
         img_comp_metrics_jpeg.update(transform(img).unsqueeze(0), transform(jpeg_img).unsqueeze(0))
 
-        reconstructed.save(f"{OUTPUT_DIR}/{model_checkpoint.replace("/", "_")}_{i}_reconstructed.png")
+        if i < N_SAVE:
+            compression_metrics.append(ImageCompressionMetric(f"img_{i}", img, bottleneck, reconstructed))
+            reconstructed.save(f"{OUTPUT_DIR}/{evaluation_name}_{i}_reconstructed.png")
+
+    for metric in compression_metrics:
+        metric.print_summary()
 
     print("\nOur comparison metrics:")
     img_comp_metrics_ours.print_summary()
     print("\nJPEG comparison metrics:")
     img_comp_metrics_jpeg.print_summary()
 
-def eval_patches(model_name, model_checkpoint, datamodule):
+def eval_patches(model, evaluation_name, datamodule):
     datamodule.setup()
     val_loader = datamodule.val_dataloader()
 
     print("Running evaluation by patches... \n")
 
+    metrics_compressed = ImageComparisonMetrics("original", "recovered (compressed)")
+    metrics_just_cae = ImageComparisonMetrics("original", "recovered (no compression)")
+
+    first_batch_originals = torch.empty(0)
+    first_batch_recs_compressed = torch.empty(0)
+    first_batch_recs_just_cae = torch.empty(0)
+
+    device = next(model.parameters()).device
+
+    print("Evaluating model over the validation set...")
+    with torch.no_grad():
+        for i, batch in enumerate(val_loader):
+            if i >= 50:
+                break
+
+            originals = batch.to(device)
+            recs_compress = model(originals)
+            recs_just_cae = model.forward_just_cae(originals)
+
+            if datamodule.ycbcr:
+                originals = torch.stack([
+                    TF.to_tensor(TF.to_pil_image(img, mode='YCbCr').convert('RGB'))
+                    for img in originals
+                ])
+                recs_compress = torch.stack([
+                    TF.to_tensor(TF.to_pil_image(img, mode='YCbCr').convert('RGB'))
+                    for img in recs_compress
+                ])
+                recs_just_cae = torch.stack([
+                    TF.to_tensor(TF.to_pil_image(img, mode='YCbCr').convert('RGB'))
+                    for img in recs_just_cae
+                ])
+
+            metrics_compressed.update(recs_compress, originals)
+            metrics_just_cae.update(recs_just_cae, originals)
+
+            if i == 0:
+                first_batch_originals = originals
+                first_batch_recs_compressed = recs_compress
+                first_batch_recs_just_cae = recs_just_cae
+
+    metrics_just_cae.print_summary()
+    metrics_compressed.print_summary()
+
+    comparison = torch.cat([first_batch_originals, first_batch_recs_just_cae, first_batch_recs_compressed])
+    save_path = f"outputs/{evaluation_name}_comparison.png"
+    save_image(comparison, save_path, nrow=first_batch_originals.shape[0])
+    print(f"Image saved to {save_path}")
+ 
+def load_model_from_checkpoint(model_name, model_checkpoint):
     print(f"Loading {model_name} from {model_checkpoint}...")
     model_class = get_model(model_name).__class__
     model = model_class.load_from_checkpoint(model_checkpoint)
@@ -235,37 +298,26 @@ def eval_patches(model_name, model_checkpoint, datamodule):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
-    img_comp_metrics = ImageComparisonMetrics()
+    return model
 
-    first_batch_originals = torch.empty(0)
-    first_batch_reconstructions = torch.empty(0)
-
-    print("Evaluating model over the validation set...")
-    with torch.no_grad():
-        for i, batch in enumerate(val_loader):
-            originals = batch.to(device)
-            reconstructions = model(originals)
-
-            img_comp_metrics.update(reconstructions, originals)
-
-            if i == 0:
-                first_batch_originals = originals
-                first_batch_reconstructions = reconstructions
-
-    img_comp_metrics.print_summary()
-
-    comparison = torch.cat([first_batch_originals, first_batch_reconstructions])
-    save_path = f"outputs/{model_checkpoint.replace("/", "_")}_comparison.png"
-    save_image(comparison, save_path, nrow=first_batch_originals.shape[0])
-    print(f"Image saved to {save_path}")
- 
 def main():
     os.makedirs("outputs", exist_ok=True)
-    #eval_patches("basic", "checkpoints/basic_imagenet10k-basic-best.ckpt", datamodule_default_imagenet10k)
-    #eval_compression("basic", "checkpoints/basic_imagenet10k-basic-best.ckpt", datamodule_no_crop_imagenet10k)
+
+    #TODO get rid of need for crop datamodule in eval_patches
+
+    # basic_model = load_model_from_checkpoint("basic", "checkpoints/basic_imagenet10k-basic-best-v1.ckpt")
     
-    eval_patches("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_default_concat)
-    eval_compression("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_no_crop_concat)
+    if False:
+        basic_model = torch.load("checkpoints/manual/basic_best.pt", weights_only=False)
+        eval_patches(basic_model, "basic_eval", datamodule_imagenet10k_crop)
+        eval_compression(basic_model, "basic_eval", datamodule_imagenet10k_no_crop)
+    else:
+        dcal_model = torch.load("checkpoints/manual/DCAL_2018_best.pt", weights_only=False)
+        eval_patches(dcal_model, "basic_eval", datamodule_imagenet10k_crop)
+        eval_compression(dcal_model, "basic_eval", datamodule_imagenet10k_no_crop)
+
+    #eval_patches("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_default_concat)
+    #eval_compression("DCAL_2018", "checkpoints/dcal_combined-DCAL_2018-best.ckpt", datamodule_no_crop_concat)
 
 if __name__ == "__main__":
     main()

@@ -1,30 +1,32 @@
 import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import CSVLogger
+import os
 
-from data import ImageNetSubsetDataModule, ClassImagesDataModule, Div2KDataModule, ConcatDatasetsDataModule
+from data import ClassImagesDataModule, DF2KDataModule
 
 from models import get_model
 
+from evaluate import eval_compression, eval_patches
+
 torch.set_float32_matmul_precision("medium")
 
-datamodule_default_div2k = Div2KDataModule(
-    train_dir="../datasets/DIV2K_train_HR",
-    val_dir="../datasets/DIV2K_train_HR",
-    batch_size=8
+datamodule_default_imagenet10k = ClassImagesDataModule(
+    data_dir="datasets/imagenet_10K/imagenet_subtrain",
+    batch_size=16,
+    random_crop=True,
+    ycbcr=True,
+    patch_size=128
 )
 
-datamodule_default_imagenet10k = ClassImagesDataModule(
-    data_dir="../datasets/imagenet_subtrain",
+datamodule_df2k = DF2KDataModule(
+    train_dir="datasets/DF2K/train",
+    test_dir="datasets/DF2K/test",
     batch_size=8,
+    ycbcr=True,
     random_crop=True
 )
-
-datamodule_default_concat = ConcatDatasetsDataModule(
-    [datamodule_default_div2k, datamodule_default_imagenet10k],
-    batch_size=8
-)
-
 
 def experiment1():
     """
@@ -32,8 +34,8 @@ def experiment1():
     """
     EXPERIMENT_NAME = "basic_imagenet10k"
     MODEL_NAME = "basic"
-    EPOCHS = 5
-    LEARNING_RATE = 1e-3
+    EPOCHS = 15
+    LEARNING_RATE = 2e-4
     
     model = get_model(MODEL_NAME, learning_rate=LEARNING_RATE)
 
@@ -44,13 +46,13 @@ def experiment1():
         filename=checkpoint_filename,
         save_top_k=1,
         monitor="val_loss",
-        mode="min"
+        mode="min",
     )
 
     trainer = pl.Trainer(
         max_epochs=EPOCHS,
         accelerator="auto",
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback]
     )
 
     print("="*30)
@@ -58,18 +60,39 @@ def experiment1():
 
     print(f"Starting training for {MODEL_NAME}...")
     trainer.fit(model, datamodule_default_imagenet10k)
-    print(f"Training complete. Best model saved to checkpoints/{checkpoint_filename}.ckpt")
+    print(f"Training complete. Best model saved to checkpoints/{os.path.basename(checkpoint_filename)}.ckpt")
 
     print(f"Finished experiment: {EXPERIMENT_NAME}")
     print("="*30)
 
+    # compute latents for quantization
+    print("Computing priors...")
+    all_latents = []
+    model.eval()
+    device = next(model.parameters()).device
+    with torch.no_grad():
+        for batch in datamodule_default_imagenet10k.train_dataloader():
+            batch = batch.to(device)
+            z = model.encoder(batch)
+            all_latents.append(z)
+
+    all_latents = torch.cat(all_latents, dim=0)
+
+    # load best model weights
+    best_model = ( model.__class__).load_from_checkpoint(checkpoint_callback.best_model_path)
+    best_model.to(device)
+    # compute priors from latents
+    best_model.compute_priors(all_latents)
+    # save model as torch object
+    torch.save(best_model, f"checkpoints/manual/{MODEL_NAME}_best.pt")
+
 def experiment2():
     """
-        Train a basic DCAL 2018 on div2K and imagenet combined.
+        Train a basic DCAL 2018 on ImageNet..
     """
-    EXPERIMENT_NAME = "dcal_combined"
+    EXPERIMENT_NAME = "dcal_df2k"
     MODEL_NAME = "DCAL_2018"
-    EPOCHS = 10
+    EPOCHS = 20 
     LEARNING_RATE = 1e-4
     
     model = get_model(MODEL_NAME, learning_rate=LEARNING_RATE)
@@ -84,25 +107,35 @@ def experiment2():
         mode="min"
     )
 
+    csv_logger = CSVLogger("logs/", name=EXPERIMENT_NAME)
+
     trainer = pl.Trainer(
         max_epochs=EPOCHS,
         accelerator="auto",
         callbacks=[checkpoint_callback],
+        logger=csv_logger,
     )
 
     print("="*30)
     print(f"Started experiment: {EXPERIMENT_NAME}")
 
     print(f"Starting training for {MODEL_NAME}...")
-    trainer.fit(model, datamodule_default_concat)
-    print(f"Training complete. Best model saved to checkpoints/{checkpoint_filename}.ckpt")
+    trainer.fit(model, datamodule_default_imagenet10k)
+    print(f"Training complete. Best model saved to checkpoints/{os.path.basename(checkpoint_filename)}")
 
     print(f"Finished experiment: {EXPERIMENT_NAME}")
     print("="*30)
 
+    # load best model weights
+    best_model = ( model.__class__).load_from_checkpoint(checkpoint_callback.best_model_path)
+    # save model as torch object
+    torch.save(best_model, f"checkpoints/manual/{MODEL_NAME}_best.pt")
+
 def main():
-    experiment1()
-    #experiment2()
+   # pass
+    #experiment1()
+    experiment2()
+
 
 if __name__ == "__main__":
     main()
